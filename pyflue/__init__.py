@@ -1,6 +1,6 @@
 """PyFlue public API."""
 
-from pyflue.core import PyFlueAgent, PyFlueSession, init
+from pyflue.core import PyFlueAgent, PyFlueSession, PyFlueSessions, init
 from pyflue.harnesses.registry import register_harness
 from pyflue.routing import AgentRoute, PyFlueContext, discover_agent_routes
 from pyflue.skills import Role, Skill, load_roles, load_skills
@@ -11,6 +11,7 @@ __all__ = [
     "PyFlueContext",
     "PyFlueEvent",
     "PyFlueSession",
+    "PyFlueSessions",
     "AgentRoute",
     "Role",
     "Skill",

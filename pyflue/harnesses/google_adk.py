@@ -23,6 +23,7 @@ class GoogleADKBackend(HarnessBackend):
         sandbox: Any,
         session_id: str,
         python_backend: Any | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
         stream: bool = False,
     ) -> HarnessResult:
         raise NotImplementedError(

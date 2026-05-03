@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pyflue.skills import (
     load_project_instructions,
+    load_roles,
     load_skills,
     parse_skill,
     render_skill_prompt,
@@ -54,6 +55,19 @@ def test_load_skills_and_render_prompt(tmp_path):
     assert '"x": 1' in prompt
 
 
+def test_load_deepagents_style_skill_directories(tmp_path):
+    skills_dir = tmp_path / ".agents" / "skills"
+    (skills_dir / "review").mkdir(parents=True)
+    (skills_dir / "plan").mkdir(parents=True)
+    (skills_dir / "review" / "SKILL.md").write_text("Review code.", encoding="utf-8")
+    (skills_dir / "plan" / "SKILL.md").write_text("Make a plan.", encoding="utf-8")
+
+    skills = load_skills(tmp_path)
+
+    assert sorted(skills) == ["plan", "review"]
+    assert skills["review"].instructions == "Review code."
+
+
 def test_load_project_instructions(tmp_path):
     (tmp_path / "AGENTS.md").write_text("Base instructions", encoding="utf-8")
     (tmp_path / "CLAUDE.md").write_text("Extra instructions", encoding="utf-8")
@@ -62,3 +76,16 @@ def test_load_project_instructions(tmp_path):
 
     assert "Base instructions" in instructions
     assert "Extra instructions" in instructions
+
+
+def test_load_role_model_frontmatter(tmp_path):
+    role_dir = tmp_path / ".agents" / "roles"
+    role_dir.mkdir(parents=True)
+    (role_dir / "coder.md").write_text(
+        "---\nname: coder\nmodel: role-model\n---\nReview code.",
+        encoding="utf-8",
+    )
+
+    roles = load_roles(tmp_path)
+
+    assert roles["coder"].model == "role-model"

@@ -32,6 +32,7 @@ class MontyPythonBackend:
         resource_limits: dict[str, Any] | None = None,
         mount: Any | None = None,
     ) -> PythonRunResult:
+        legacy_api = False
         try:
             from pydantic_monty import MontyRepl, OSAccess, ResourceLimits
         except Exception:
@@ -43,10 +44,11 @@ class MontyPythonBackend:
                     "Install with: pip install 'pyflue[monty]'"
                 ) from exc
             MontyRepl = Monty
+            legacy_api = True
 
         if restart or self._repl is None:
             limits = _resource_limits(ResourceLimits, timeout=timeout, values=resource_limits)
-            if MontyRepl is Monty:
+            if legacy_api:
                 input_names = list(inputs.keys()) if inputs else None
                 self._repl = MontyRepl(
                     code,
@@ -71,7 +73,7 @@ class MontyPythonBackend:
         os_access = _os_access_for_sandbox(self.sandbox, OSAccess)
         limits = _resource_limits(ResourceLimits, timeout=timeout, values=resource_limits)
 
-        if MontyRepl is Monty:
+        if legacy_api:
             run_inputs = inputs if inputs else None
             result = self._repl.run(
                 inputs=run_inputs,

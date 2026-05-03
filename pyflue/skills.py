@@ -58,7 +58,8 @@ def parse_skill(path: str | Path) -> Skill:
     skill_path = Path(path).expanduser().resolve()
     post = frontmatter.loads(skill_path.read_text(encoding="utf-8"))
     metadata: dict[str, Any] = dict(post.metadata or {})
-    name = str(metadata.get("name") or skill_path.stem).strip()
+    default_name = skill_path.parent.name if skill_path.name.upper() == "SKILL.MD" else skill_path.stem
+    name = str(metadata.get("name") or default_name).strip()
     if not name:
         raise ValueError(f"Skill name cannot be empty: {skill_path}")
     return Skill(
@@ -83,6 +84,7 @@ def parse_role(path: str | Path) -> Role:
         name=name,
         description=str(metadata.get("description", "") or "").strip(),
         instructions=str(post.content or "").strip(),
+        model=str(metadata["model"]).strip() if metadata.get("model") else None,
         path=role_path,
     )
 

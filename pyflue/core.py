@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +27,7 @@ from pyflue.skills import (
     load_skills,
     render_skill_prompt,
 )
-from pyflue.types import HarnessResult, PyFlueConfig, PyFlueEvent
+from pyflue.types import HarnessResult, PyFlueConfig, PyFlueEvent, Role
 
 RESULT_START = "---RESULT_START---"
 RESULT_END = "---RESULT_END---"
@@ -98,21 +100,75 @@ class PyFlueAgent:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.sandbox_state_dir = config.root / ".pyflue" / "sandboxes"
         self.sandbox_state_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions = PyFlueSessions(self)
 
-    async def session(self, session_id: str | None = None) -> PyFlueSession:
+    async def session(
+        self,
+        session_id: str | None = None,
+        *,
+        role: str | None = None,
+    ) -> PyFlueSession:
         """Open or create a persistent session."""
         sid = session_id or "default"
-        session = PyFlueSession(agent=self, session_id=sid)
+        session = PyFlueSession(agent=self, session_id=sid, role=role)
         await session._ensure_store()
         return session
+
+
+class PyFlueSessions:
+    """Explicit session lifecycle helper exposed as `agent.sessions`."""
+
+    def __init__(self, agent: PyFlueAgent):
+        self.agent = agent
+
+    async def get(
+        self,
+        session_id: str | None = None,
+        *,
+        role: str | None = None,
+    ) -> PyFlueSession:
+        """Load an existing session."""
+        sid = session_id or "default"
+        session = PyFlueSession(agent=self.agent, session_id=sid, role=role)
+        if not session.db_path.exists():
+            raise KeyError(f"Session does not exist: {sid}")
+        await session._ensure_store()
+        return session
+
+    async def create(
+        self,
+        session_id: str | None = None,
+        *,
+        role: str | None = None,
+    ) -> PyFlueSession:
+        """Create a new session and fail if it already exists."""
+        sid = session_id or "default"
+        session = PyFlueSession(agent=self.agent, session_id=sid, role=role)
+        if session.db_path.exists():
+            raise FileExistsError(f"Session already exists: {sid}")
+        await session._ensure_store()
+        return session
+
+    async def delete(self, session_id: str | None = None) -> None:
+        """Delete one session's persisted state and sandbox files."""
+        sid = session_id or "default"
+        session = PyFlueSession(agent=self.agent, session_id=sid)
+        if session.db_path.exists():
+            session.db_path.unlink()
+        sandbox_root = self.agent.sandbox_state_dir / session.safe_id
+        if sandbox_root.exists():
+            shutil.rmtree(sandbox_root)
 
 
 class PyFlueSession:
     """One persistent PyFlue conversation."""
 
-    def __init__(self, *, agent: PyFlueAgent, session_id: str):
+    def __init__(self, *, agent: PyFlueAgent, session_id: str, role: str | None = None):
         self.agent = agent
         self.session_id = session_id
+        self.session_role = role
+        self.deleted = False
+        self.active_operation: str | None = None
         safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", session_id)
         self.safe_id = safe_id
         self.db_path = self.agent.state_dir / f"{safe_id}.sqlite3"
@@ -138,23 +194,34 @@ class PyFlueSession:
         retries: int | None = None,
         stream: bool = False,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> HarnessResult | Any:
         """Run one prompt turn."""
+        self._assert_active()
         prompt = self._build_prompt(text, result=result, role=role)
         await self._append("user", text)
         history = await self._history_prompt(prompt)
-        with self._grant_secrets(secrets):
-            output = await self._run_backend(history, model=model, stream=stream)
-        await self._append("assistant", output.text)
-        if result is not None:
-            return await self._parse_with_retry(
-                output,
-                result,
-                original_prompt=history,
+        with self._grant_secrets(secrets), self._scope_commands(commands):
+            output = await self._run_backend(
+                history,
                 model=model,
-                retries=self.agent.config.typed_retries if retries is None else retries,
+                role=role,
+                tools=tools,
                 stream=stream,
             )
+            await self._append("assistant", output.text)
+            if result is not None:
+                return await self._parse_with_retry(
+                    output,
+                    result,
+                    original_prompt=history,
+                    model=model,
+                    role=role,
+                    tools=tools,
+                    retries=self.agent.config.typed_retries if retries is None else retries,
+                    stream=stream,
+                )
         return output
 
     async def stream(
@@ -164,23 +231,34 @@ class PyFlueSession:
         role: str | None = None,
         model: str | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> AsyncIterator[PyFlueEvent]:
         """Stream normalized PyFlue events for one prompt turn."""
+        self._assert_active()
         yield PyFlueEvent("start", {"session_id": self.session_id})
         try:
-            result = await self.prompt(
-                text,
-                role=role,
-                model=model,
-                stream=True,
-                secrets=secrets,
-            )
-            if isinstance(result, HarnessResult):
-                if result.text:
-                    yield PyFlueEvent("delta", {"text": result.text})
-                yield PyFlueEvent("end", {"text": result.text, "metadata": result.metadata})
-            else:
-                yield PyFlueEvent("end", {"result": result})
+            prompt = self._build_prompt(text, role=role)
+            await self._append("user", text)
+            history = await self._history_prompt(prompt)
+            chunks: list[str] = []
+            final_text = ""
+            with self._grant_secrets(secrets), self._scope_commands(commands):
+                async for event in self._stream_backend(
+                    history,
+                    model=model,
+                    role=role,
+                    tools=tools,
+                ):
+                    if event.type == "delta":
+                        text_delta = str(event.data.get("text", ""))
+                        chunks.append(text_delta)
+                    elif event.type == "end":
+                        final_text = str(event.data.get("text", ""))
+                    yield event
+            text_out = "".join(chunks) or final_text
+            if text_out:
+                await self._append("assistant", text_out)
         except Exception as exc:
             yield PyFlueEvent("error", {"message": str(exc), "type": type(exc).__name__})
             raise
@@ -196,6 +274,8 @@ class PyFlueSession:
         retries: int | None = None,
         stream: bool = False,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> HarnessResult | Any:
         """Run a Markdown-defined skill."""
         skill = self.agent.skills.get(name)
@@ -211,6 +291,8 @@ class PyFlueSession:
             retries=retries,
             stream=stream,
             secrets=secrets,
+            commands=commands,
+            tools=tools,
         )
 
     async def subagent(
@@ -221,9 +303,19 @@ class PyFlueSession:
         role: str | None = None,
         model: str | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> HarnessResult | Any:
         """Run a child session with isolated history and shared sandbox."""
-        output = await self.task(prompt, result=result, role=role, model=model, secrets=secrets)
+        output = await self.task(
+            prompt,
+            result=result,
+            role=role,
+            model=model,
+            secrets=secrets,
+            commands=commands,
+            tools=tools,
+        )
         return output
 
     async def task(
@@ -235,13 +327,24 @@ class PyFlueSession:
         model: str | None = None,
         task_id: str | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> HarnessResult | Any:
         """Run a Flue-style child task with shared sandbox and isolated history."""
+        self._assert_active()
         child_id = task_id or f"{self.session_id}:task:{uuid.uuid4().hex[:10]}"
-        child = await self.agent.session(child_id)
+        child = await self.agent.session(child_id, role=role or self.session_role)
         child.sandbox = self.sandbox
         child.python_backend = self.python_backend
-        output = await child.prompt(prompt, result=result, role=role, model=model, secrets=secrets)
+        output = await child.prompt(
+            prompt,
+            result=result,
+            role=role,
+            model=model,
+            secrets=secrets,
+            commands=commands,
+            tools=tools,
+        )
         await self._append("assistant", f"Subagent {child_id} completed.")
         return output
 
@@ -326,9 +429,11 @@ class PyFlueSession:
         *,
         timeout: int | None = 120,
         secrets: list[str] | tuple[str, ...] | None = None,
+        commands: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """Run a shell command through the configured sandbox."""
-        with self._grant_secrets(secrets):
+        self._assert_active()
+        with self._grant_secrets(secrets), self._scope_commands(commands):
             output = await self.agent.backend.shell(
                 command,
                 sandbox=self.sandbox,
@@ -339,11 +444,61 @@ class PyFlueSession:
 
     async def read_file(self, path: str) -> str:
         """Read a file from the session sandbox."""
+        self._assert_active()
         return self.sandbox.read_file(path)
 
     async def write_file(self, path: str, content: str) -> str:
         """Write a file into the session sandbox."""
+        self._assert_active()
         return self.sandbox.write_file(path, content)
+
+    async def compact(
+        self,
+        *,
+        keep_recent: int = 6,
+        model: str | None = None,
+    ) -> HarnessResult:
+        """Summarize older conversation state and keep recent turns verbatim."""
+        self._assert_active()
+        rows = await self._all_messages()
+        if len(rows) <= keep_recent:
+            return HarnessResult(
+                text="No compaction needed.",
+                metadata={"harness": self.agent.backend.name, "compacted": False},
+            )
+        split = max(len(rows) - max(keep_recent, 0), 0)
+        older = rows[:split]
+        recent = rows[split:]
+        transcript = "\n\n".join(f"{role}: {content}" for role, content in older)
+        prompt = (
+            "Summarize this conversation history for future continuation. "
+            "Preserve user goals, decisions, tool results, files changed, open tasks, "
+            "and any constraints. Return only the summary.\n\n"
+            f"{transcript}"
+        )
+        summary = await self._run_backend(
+            prompt,
+            model=model,
+            role=None,
+            tools=None,
+            stream=False,
+        )
+        await self._replace_messages(
+            [("summary", summary.text.strip()), *recent],
+        )
+        summary.metadata["compacted"] = True
+        summary.metadata["messages_before"] = len(rows)
+        summary.metadata["messages_after"] = len(recent) + 1
+        return summary
+
+    def close(self) -> None:
+        """Mark this session handle closed."""
+        self.deleted = True
+
+    async def delete(self) -> None:
+        """Delete this session's persisted state and sandbox files."""
+        self.close()
+        await self.agent.sessions.delete(self.session_id)
 
     async def _ensure_store(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -369,6 +524,21 @@ class PyFlueSession:
             rows = await cursor.fetchall()
         return list(reversed([(str(role), str(content)) for role, content in rows]))
 
+    async def _all_messages(self) -> list[tuple[str, str]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("select role, content from messages order by id")
+            rows = await cursor.fetchall()
+        return [(str(role), str(content)) for role, content in rows]
+
+    async def _replace_messages(self, rows: list[tuple[str, str]]) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("delete from messages")
+            await db.executemany(
+                "insert into messages(role, content) values (?, ?)",
+                rows,
+            )
+            await db.commit()
+
     async def _history_prompt(self, prompt: str) -> str:
         rows = await self._messages()
         if not rows:
@@ -381,11 +551,15 @@ class PyFlueSession:
         prompt: str,
         *,
         model: str | None,
+        role: str | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
         stream: bool,
     ) -> HarnessResult:
         config = self.agent.config
-        if model is not None:
-            config = PyFlueConfig(**{**config.__dict__, "model": model})
+        effective_role = self._effective_role(role)
+        resolved_model = model or (effective_role.model if effective_role else None)
+        if resolved_model is not None:
+            config = PyFlueConfig(**{**config.__dict__, "model": resolved_model})
         return await self.agent.backend.run(
             prompt=prompt,
             system_prompt=self.agent.instructions,
@@ -394,8 +568,34 @@ class PyFlueSession:
             sandbox=self.sandbox,
             session_id=self.session_id,
             python_backend=self.python_backend,
+            tools=tools,
             stream=stream,
         )
+
+    async def _stream_backend(
+        self,
+        prompt: str,
+        *,
+        model: str | None,
+        role: str | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
+    ) -> AsyncIterator[PyFlueEvent]:
+        config = self.agent.config
+        effective_role = self._effective_role(role)
+        resolved_model = model or (effective_role.model if effective_role else None)
+        if resolved_model is not None:
+            config = PyFlueConfig(**{**config.__dict__, "model": resolved_model})
+        async for event in self.agent.backend.stream(
+            prompt=prompt,
+            system_prompt=self.agent.instructions,
+            config=config,
+            skills=self.agent.skills,
+            sandbox=self.sandbox,
+            session_id=self.session_id,
+            python_backend=self.python_backend,
+            tools=tools,
+        ):
+            yield event
 
     @contextmanager
     def _grant_secrets(self, names: list[str] | tuple[str, ...] | None):
@@ -417,6 +617,19 @@ class PyFlueSession:
             env.clear()
             env.update(previous)
 
+    @contextmanager
+    def _scope_commands(self, commands: list[str] | tuple[str, ...] | None):
+        if not commands:
+            yield
+            return
+        previous = self.sandbox.policy
+        merged = tuple(dict.fromkeys([*previous.allowed_commands, *(str(item) for item in commands)]))
+        try:
+            self.sandbox.policy = replace(previous, allowed_commands=merged)
+            yield
+        finally:
+            self.sandbox.policy = previous
+
     async def _parse_with_retry(
         self,
         output: HarnessResult,
@@ -424,6 +637,8 @@ class PyFlueSession:
         *,
         original_prompt: str,
         model: str | None,
+        role: str | None,
+        tools: list[Any] | tuple[Any, ...] | None,
         retries: int,
         stream: bool,
     ) -> Any:
@@ -445,7 +660,13 @@ class PyFlueSession:
                     "that satisfies this schema:\n"
                     f"{json.dumps(schema, indent=2, sort_keys=True)}"
                 )
-                current = await self._run_backend(repair_prompt, model=model, stream=stream)
+                current = await self._run_backend(
+                    repair_prompt,
+                    model=model,
+                    role=role,
+                    tools=tools,
+                    stream=stream,
+                )
                 await self._append("assistant", current.text)
         raise ValueError(f"Structured output validation failed: {last_error}") from last_error
 
@@ -459,11 +680,8 @@ class PyFlueSession:
         parts = [
             "You are running inside PyFlue, a headless Python agent harness.",
         ]
-        if role:
-            selected = self.agent.roles.get(role)
-            if selected is None:
-                available = ", ".join(sorted(self.agent.roles)) or "(none)"
-                raise KeyError(f"Unknown role '{role}'. Available roles: {available}")
+        selected = self._effective_role(role)
+        if selected:
             parts.append(f"Role: {selected.name}\n{selected.instructions}")
         parts.append(text.strip())
         if result is not None:
@@ -477,6 +695,20 @@ class PyFlueSession:
                 ]
             )
         return "\n\n".join(parts)
+
+    def _effective_role(self, role: str | None) -> Role | None:
+        role_name = role or self.session_role
+        if not role_name:
+            return None
+        selected = self.agent.roles.get(role_name)
+        if selected is None:
+            available = ", ".join(sorted(self.agent.roles)) or "(none)"
+            raise KeyError(f"Unknown role '{role_name}'. Available roles: {available}")
+        return selected
+
+    def _assert_active(self) -> None:
+        if self.deleted:
+            raise RuntimeError(f"Session is closed: {self.session_id}")
 
 
 def _parse_typed_result(text: str, result: Any) -> Any:

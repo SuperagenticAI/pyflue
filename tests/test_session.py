@@ -83,6 +83,48 @@ async def test_session_prompt_applies_role_and_model_override(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_session_role_model_precedence(tmp_path):
+    role_dir = tmp_path / ".agents" / "roles"
+    role_dir.mkdir(parents=True)
+    (role_dir / "coder.md").write_text(
+        "---\nname: coder\nmodel: role-model\n---\nYou review code carefully.",
+        encoding="utf-8",
+    )
+    config = PyFlueConfig(root=tmp_path, harness="deepagents", model="base-model")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend()
+
+    session = await agent.session("s1", role="coder")
+    await session.prompt("hello")
+    await session.prompt("hello", model="call-model")
+
+    assert agent.backend.calls[0]["config"].model == "role-model"
+    assert agent.backend.calls[1]["config"].model == "call-model"
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_lifecycle_helpers(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend()
+
+    created = await agent.sessions.create("new")
+    loaded = await agent.sessions.get("new")
+
+    assert created.session_id == "new"
+    assert loaded.session_id == "new"
+    with pytest.raises(FileExistsError):
+        await agent.sessions.create("new")
+
+    await loaded.delete()
+
+    with pytest.raises(KeyError):
+        await agent.sessions.get("new")
+    with pytest.raises(RuntimeError):
+        await loaded.prompt("closed")
+
+
+@pytest.mark.asyncio
 async def test_session_prompt_retries_invalid_typed_output(tmp_path):
     config = PyFlueConfig(root=tmp_path, harness="deepagents", typed_retries=1)
     agent = PyFlueAgent(config=config)
@@ -144,6 +186,59 @@ async def test_session_secrets_are_grant_based_for_shell(tmp_path):
 
     assert without_grant["stdout"].strip() == "None"
     assert with_grant["stdout"].strip() == "secret"
+
+
+@pytest.mark.asyncio
+async def test_session_commands_are_scoped_per_call(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(
+            allow_shell=True,
+            allowed_commands=("python",),
+        ),
+    )
+    session = await agent.session("s1")
+
+    scoped = await session.shell("printf scoped", commands=["printf"])
+
+    assert scoped["stdout"] == "scoped"
+    with pytest.raises(PermissionError):
+        await session.shell("printf blocked")
+
+
+@pytest.mark.asyncio
+async def test_session_prompt_passes_scoped_tools(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    async def lookup(value: str) -> str:
+        return value
+
+    await (await agent.session("s1")).prompt("hello", tools=[lookup])
+
+    assert agent.backend.calls[0]["tools"] == [lookup]
+
+
+@pytest.mark.asyncio
+async def test_session_compact_summarizes_older_history(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["summary"])
+    session = await agent.session("s1")
+    for index in range(4):
+        await session._append("user", f"message {index}")
+
+    result = await session.compact(keep_recent=2)
+    messages = await session._all_messages()
+
+    assert result.metadata["compacted"] is True
+    assert messages == [
+        ("summary", "summary"),
+        ("user", "message 2"),
+        ("user", "message 3"),
+    ]
 
 
 @pytest.mark.asyncio

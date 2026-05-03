@@ -3,8 +3,13 @@ from __future__ import annotations
 import sys
 from types import ModuleType
 
-from pyflue.harnesses.deepagents import _DeepAgentsSandboxBackend, _permissions
+from pyflue.harnesses.deepagents import (
+    _create_agent_call,
+    _DeepAgentsSandboxBackend,
+    _permissions,
+)
 from pyflue.sandbox import SandboxPolicy, VirtualSandbox
+from pyflue.types import PyFlueConfig
 
 
 def test_deepagents_backend_upload_download_and_execute(monkeypatch, tmp_path):
@@ -23,6 +28,71 @@ def test_deepagents_backend_upload_download_and_execute(monkeypatch, tmp_path):
     assert download[0].content == b"instructions"
     assert execute.output == "instructions"
     assert execute.exit_code == 0
+
+
+def test_deepagents_backend_advertises_execution_support(tmp_path):
+    from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+
+    backend = _DeepAgentsSandboxBackend(VirtualSandbox(tmp_path))
+
+    assert isinstance(backend, BackendProtocol)
+    assert isinstance(backend, SandboxBackendProtocol)
+
+
+def test_deepagents_backend_write_and_edit_match_deepagents_contract(tmp_path):
+    sandbox = VirtualSandbox(
+        tmp_path,
+        SandboxPolicy(allow_write=True),
+    )
+    backend = _DeepAgentsSandboxBackend(sandbox)
+
+    created = backend.write("/notes.txt", "alpha\nbeta\nalpha\n")
+    duplicate_write = backend.write("/notes.txt", "replace")
+    ambiguous_edit = backend.edit("/notes.txt", "alpha", "gamma")
+    replace_all = backend.edit("/notes.txt", "alpha", "gamma", replace_all=True)
+
+    assert created.error is None
+    assert "already exists" in duplicate_write.error
+    assert "2 occurrences" in ambiguous_edit.error
+    assert replace_all.error is None
+    assert replace_all.occurrences == 2
+    assert sandbox.read_file("notes.txt") == "gamma\nbeta\ngamma"
+
+
+def test_deepagents_agent_call_omits_permissions_for_executable_backend(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_create_deep_agent(**kwargs):
+        captured.update(kwargs)
+
+        class FakeAgent:
+            def invoke(self, *_args, **_kwargs):
+                return "ok"
+
+        return FakeAgent()
+
+    fake_deepagents = ModuleType("deepagents")
+    fake_deepagents.create_deep_agent = fake_create_deep_agent
+    monkeypatch.setitem(sys.modules, "deepagents", fake_deepagents)
+
+    sandbox = VirtualSandbox(
+        tmp_path,
+        SandboxPolicy(allow_write=True, allow_shell=False),
+    )
+    _create_agent_call(
+        prompt="hello",
+        system_prompt="",
+        config=PyFlueConfig(root=tmp_path),
+        skills={},
+        sandbox=sandbox,
+        session_id="s1",
+        python_backend=None,
+        tools=None,
+        harness_name="deepagents",
+        stream=False,
+    )
+
+    assert captured["permissions"] is None
 
 
 def test_deepagents_permissions_mirror_sandbox_policy(monkeypatch, tmp_path):

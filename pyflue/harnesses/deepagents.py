@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pyflue.harnesses.base import HarnessBackend
 from pyflue.sandboxes.base import SandboxBackend
-from pyflue.types import HarnessResult, PyFlueConfig, Skill
+from pyflue.types import HarnessResult, PyFlueConfig, PyFlueEvent, Skill
+
+try:
+    from deepagents.backends.protocol import (
+        SandboxBackendProtocol as _DeepAgentsSandboxBase,
+    )
+except Exception:
+    _DeepAgentsSandboxBase = object
 
 
 class DeepAgentsBackend(HarnessBackend):
@@ -25,32 +33,21 @@ class DeepAgentsBackend(HarnessBackend):
         sandbox: Any,
         session_id: str,
         python_backend: Any | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
         stream: bool = False,
     ) -> HarnessResult:
-        try:
-            from deepagents import create_deep_agent
-        except Exception as exc:
-            raise ImportError(
-                "The DeepAgents backend requires the 'deepagents' package. "
-                "Install with: pip install pyflue"
-            ) from exc
-
-        backend = _DeepAgentsSandboxBackend(sandbox) if _is_pyflue_sandbox(sandbox) else None
-        skill_sources = _skill_sources(config)
-        memory = _memory_sources(config)
-        agent = create_deep_agent(
-            model=config.model,
-            tools=_tools(python_backend),
-            system_prompt=system_prompt or None,
-            backend=backend,
-            skills=skill_sources or None,
-            memory=memory or None,
-            permissions=_permissions(sandbox),
-            checkpointer=True,
-            name="pyflue",
+        agent, inputs, run_config, metadata = _create_agent_call(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            config=config,
+            skills=skills,
+            sandbox=sandbox,
+            session_id=session_id,
+            python_backend=python_backend,
+            tools=tools,
+            harness_name=self.name,
+            stream=stream,
         )
-        inputs = {"messages": [{"role": "user", "content": prompt}]}
-        run_config = {"configurable": {"thread_id": session_id}}
         if hasattr(agent, "ainvoke"):
             raw = await agent.ainvoke(inputs, config=run_config)
         else:
@@ -58,17 +55,64 @@ class DeepAgentsBackend(HarnessBackend):
         return HarnessResult(
             text=_extract_text(raw),
             raw=raw,
-            metadata={
-                "harness": self.name,
-                "skill_count": len(skills),
-                "skill_sources": skill_sources,
-                "memory": memory,
-                "stream": stream,
-            },
+            metadata=metadata,
         )
 
+    async def stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str,
+        config: PyFlueConfig,
+        skills: dict[str, Skill],
+        sandbox: Any,
+        session_id: str,
+        python_backend: Any | None = None,
+        tools: list[Any] | tuple[Any, ...] | None = None,
+    ) -> AsyncIterator[PyFlueEvent]:
+        agent, inputs, run_config, metadata = _create_agent_call(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            config=config,
+            skills=skills,
+            sandbox=sandbox,
+            session_id=session_id,
+            python_backend=python_backend,
+            tools=tools,
+            harness_name=self.name,
+            stream=True,
+        )
+        if not hasattr(agent, "astream_events"):
+            result = await self.run(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                config=config,
+                skills=skills,
+                sandbox=sandbox,
+                session_id=session_id,
+                python_backend=python_backend,
+                tools=tools,
+                stream=True,
+            )
+            if result.text:
+                yield PyFlueEvent("delta", {"text": result.text})
+            yield PyFlueEvent("end", {"text": result.text, "metadata": result.metadata})
+            return
 
-class _DeepAgentsSandboxBackend:
+        chunks: list[str] = []
+        raw_end: Any = None
+        async for event in agent.astream_events(inputs, config=run_config, version="v2"):
+            delta = _extract_stream_delta(event)
+            if delta:
+                chunks.append(delta)
+                yield PyFlueEvent("delta", {"text": delta, "raw": event})
+            if event.get("event") in {"on_chain_end", "on_graph_end"}:
+                raw_end = event.get("data", {}).get("output")
+        text = "".join(chunks) or _extract_text(raw_end)
+        yield PyFlueEvent("end", {"text": text, "metadata": metadata, "raw": raw_end})
+
+
+class _DeepAgentsSandboxBackend(_DeepAgentsSandboxBase):
     """Adapter from PyFlue sandboxes to DeepAgents' public backend protocol."""
 
     def __init__(self, sandbox: SandboxBackend):
@@ -108,7 +152,19 @@ class _DeepAgentsSandboxBackend:
         from deepagents.backends.protocol import WriteResult
 
         try:
-            self.sandbox.write_file(_from_backend_path(file_path), content)
+            path = _from_backend_path(file_path)
+            try:
+                self.sandbox.list_files(path)
+            except FileNotFoundError:
+                pass
+            else:
+                return WriteResult(
+                    error=(
+                        f"Cannot write to {file_path} because it already exists. "
+                        "Read and then make an edit, or write to a new path."
+                    )
+                )
+            self.sandbox.write_file(path, content)
             return WriteResult(path=file_path)
         except Exception as exc:
             return WriteResult(error=str(exc))
@@ -117,13 +173,27 @@ class _DeepAgentsSandboxBackend:
         from deepagents.backends.protocol import EditResult
 
         try:
+            content = self.sandbox.read_file(_from_backend_path(file_path))
+            occurrences = content.count(old_string)
+            if occurrences == 0:
+                return EditResult(error=f"Could not find the text in {file_path}. No changes made.")
+            if not replace_all and occurrences > 1:
+                return EditResult(
+                    error=(
+                        f"Found {occurrences} occurrences of the text in {file_path}. "
+                        "Provide more surrounding context to make the match unique, or use replace_all."
+                    )
+                )
             self.sandbox.edit_file(
                 _from_backend_path(file_path),
                 old_string,
                 new_string,
                 replace_all=replace_all,
             )
-            return EditResult(path=file_path)
+            return EditResult(
+                path=file_path,
+                occurrences=occurrences if replace_all else 1,
+            )
         except Exception as exc:
             return EditResult(error=str(exc))
 
@@ -204,6 +274,55 @@ class _DeepAgentsSandboxBackend:
         return responses
 
 
+def _create_agent_call(
+    *,
+    prompt: str,
+    system_prompt: str,
+    config: PyFlueConfig,
+    skills: dict[str, Skill],
+    sandbox: Any,
+    session_id: str,
+    python_backend: Any | None,
+    tools: list[Any] | tuple[Any, ...] | None,
+    harness_name: str,
+    stream: bool,
+) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    try:
+        from deepagents import create_deep_agent
+    except Exception as exc:
+        raise ImportError(
+            "The DeepAgents backend requires the 'deepagents' package. "
+            "Install with: pip install pyflue"
+        ) from exc
+
+    backend = _DeepAgentsSandboxBackend(sandbox) if _is_pyflue_sandbox(sandbox) else None
+    skill_sources = _skill_sources(config)
+    memory = _memory_sources(config)
+    permissions = None if backend is not None else _permissions(sandbox)
+    agent = create_deep_agent(
+        model=config.model,
+        tools=_tools(python_backend, tools),
+        system_prompt=system_prompt or None,
+        backend=backend,
+        skills=skill_sources or None,
+        memory=memory or None,
+        permissions=permissions,
+        checkpointer=None,
+        name="pyflue",
+    )
+    inputs = {"messages": [{"role": "user", "content": prompt}]}
+    run_config = {"configurable": {"thread_id": session_id}}
+    metadata = {
+        "harness": harness_name,
+        "skill_count": len(skills),
+        "skill_sources": skill_sources,
+        "memory": memory,
+        "stream": stream,
+        "tool_count": len(tools or ()),
+    }
+    return agent, inputs, run_config, metadata
+
+
 def _skill_sources(config: PyFlueConfig) -> list[str]:
     directory = config.skills_dir or config.root / ".agents" / "skills"
     return ["/" + directory.resolve().relative_to(config.root.resolve()).as_posix()] if directory.exists() else []
@@ -232,8 +351,11 @@ def _permissions(sandbox: Any) -> Any:
     ]
 
 
-def _tools(python_backend: Any | None) -> list[Any]:
-    tools: list[Any] = []
+def _tools(
+    python_backend: Any | None,
+    extra_tools: list[Any] | tuple[Any, ...] | None = None,
+) -> list[Any]:
+    tools: list[Any] = list(extra_tools or ())
     if python_backend is None:
         return tools
 
@@ -264,6 +386,26 @@ def _extract_text(raw: Any) -> str:
         if hasattr(raw, attr):
             return str(getattr(raw, attr)).strip()
     return str(raw).strip()
+
+
+def _extract_stream_delta(event: dict[str, Any]) -> str:
+    if event.get("event") not in {"on_chat_model_stream", "on_llm_stream"}:
+        return ""
+    data = event.get("data", {})
+    chunk = data.get("chunk")
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    text = getattr(chunk, "text", None)
+    return text if isinstance(text, str) else ""
 
 
 def _from_backend_path(path: str | None) -> str:

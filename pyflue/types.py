@@ -28,6 +28,7 @@ class Role:
     name: str
     instructions: str
     description: str = ""
+    model: str | None = None
     path: Path | None = None
 
 

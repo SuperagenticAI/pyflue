@@ -44,6 +44,30 @@ def test_daytona_shell_backed_file_helpers(tmp_path):
     assert sandbox.shell("cat notes/a.txt")["stdout"] == "hello provider"
 
 
+def test_shell_backed_filesystem_api(tmp_path):
+    sandbox = DaytonaSandbox(
+        sandbox=_FakeDaytonaSandbox(cwd=tmp_path),
+        workspace=str(tmp_path),
+        policy=SandboxPolicy(allow_write=True, allow_shell=True),
+    )
+
+    assert sandbox.mkdir("data/nested") == "Created /data/nested"
+    assert sandbox.exists("data/nested") is True
+    assert sandbox.write_bytes("data/nested/blob.bin", b"\x00remote") == "Wrote /data/nested/blob.bin"
+    assert sandbox.read_bytes("data/nested/blob.bin") == b"\x00remote"
+
+    file_info = sandbox.stat("data/nested/blob.bin")
+    assert file_info.path == "/data/nested/blob.bin"
+    assert file_info.is_file is True
+    assert file_info.size == 7
+
+    listed = {entry.path: entry for entry in sandbox.list_files("data/nested")}
+    assert listed["/data/nested/blob.bin"].is_file is True
+
+    assert sandbox.rm("data", recursive=True) == "Removed /data"
+    assert sandbox.exists("data") is False
+
+
 def test_e2b_provider_normalizes_command_results(tmp_path):
     fake = _FakeE2BSandbox(cwd=tmp_path)
     sandbox = E2BSandbox(

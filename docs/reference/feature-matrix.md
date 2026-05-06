@@ -10,15 +10,15 @@ This page shows what users can rely on today and what is planned next.
 | Google ADK backend | Planned | Dependency pinned, runtime not implemented. |
 | Pydantic AI backend | Planned | Dependency pinned, runtime not implemented. |
 | Markdown skills | Implemented | `.agents/skills/**/*.md`. |
-| Project instructions | Implemented | `AGENTS.md` and `CLAUDE.md`. |
+| Project instructions | Implemented | `AGENTS.md` and `CLAUDE.md` from project files and active sandbox context. |
 | Sessions | Implemented | SQLite-backed history. |
 | Automatic compaction | Implemented | Threshold compaction before turns and one prompt overflow retry. |
 | Roles | Implemented | Markdown roles from `.agents/roles/**/*.md`. |
 | Task sessions | Implemented | `session.task()` creates isolated child history with shared sandbox. |
-| Built-in agent tools | Implemented | `read`, `write`, `edit`, `bash`, `grep`, `glob`, and `task`. |
+| Built-in agent tools | Implemented | Filesystem, shell, search, glob, and task tools. |
 | Abort/cancel | Implemented | `session.abort()` cancels active prompt, stream, task, and shell operations. |
 | Event callbacks | Implemented | `on_event` emits lifecycle, command, task, and compaction events. |
-| Virtual sandbox | Implemented | Persistent per-session workspace with path boundary checks and policy-gated shell execution. |
+| Virtual sandbox | Implemented | Persistent per-session workspace with path boundary checks, metadata helpers, binary file helpers, and policy-gated shell execution. |
 | Shell policy | Implemented | Requires `allow_shell=True`; optional `allowed_commands` grants and compound-command blocking. |
 | Secret grants | Implemented | Secrets are only mounted into sandbox env for calls that request them. |
 | Write policy | Implemented | Requires `allow_write=True`. |
@@ -29,6 +29,7 @@ This page shows what users can rely on today and what is planned next.
 | Model override | Implemented | `session.prompt(..., model="...")` and `session.skill(..., model="...")`. |
 | File-based agent routing | Implemented | `agents/*.py` and `.agents/*.py` expose `/agents/{name}/{id}` routes. |
 | Route triggers | Implemented | Agent files can declare `triggers = {"webhook": True}`. |
+| HTTP error envelopes | Implemented | Webhook requests return stable JSON error envelopes. |
 | CLI init | Implemented | Scaffolds project files. |
 | CLI run | Implemented | Runs a prompt with optional `--stream` event output. |
 | CLI skill new | Implemented | Scaffolds a skill. |

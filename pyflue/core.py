@@ -29,7 +29,9 @@ from pyflue.session_history import SessionHistory
 from pyflue.skills import (
     load_project_instructions,
     load_roles,
+    load_skill_by_path,
     load_skills,
+    parse_skill_text,
     render_skill_prompt,
 )
 from pyflue.types import (
@@ -47,7 +49,21 @@ _RESULT_RE = re.compile(
     rf"{RESULT_START}\s*\n(?P<body>[\s\S]*?)\n?{RESULT_END}",
     re.MULTILINE,
 )
-BUILTIN_TOOL_NAMES = {"read", "write", "edit", "bash", "grep", "glob", "task"}
+MAX_TOOL_OUTPUT_CHARS = 50 * 1024
+MAX_TOOL_OUTPUT_LINES = 2000
+BUILTIN_TOOL_NAMES = {
+    "read",
+    "write",
+    "edit",
+    "stat",
+    "exists",
+    "mkdir",
+    "rm",
+    "bash",
+    "grep",
+    "glob",
+    "task",
+}
 
 
 def _estimate_tokens(text: str) -> int:
@@ -85,6 +101,7 @@ async def init(
     allow_shell: bool = False,
     allowed_commands: tuple[str, ...] | list[str] | None = None,
     allow_compound_commands: bool | None = None,
+    max_task_depth: int | None = None,
     mcp_servers: dict[str, dict[str, Any]] | None = None,
     mcp_mode: str | None = None,
     mcp_search_limit: int | None = None,
@@ -117,6 +134,8 @@ async def init(
         config.allowed_commands = tuple(str(item) for item in allowed_commands)
     if allow_compound_commands is not None:
         config.allow_compound_commands = allow_compound_commands
+    if max_task_depth is not None:
+        config.max_task_depth = max_task_depth
 
     if providers:
         from pyflue.types import ProviderSettings
@@ -211,6 +230,7 @@ class PyFlueAgent:
         self.on_event = on_event
         self._active_operations: dict[str, str] = {}
         self._active_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._active_child_sessions: dict[str, set[str]] = {}
 
         self._mcp_config = mcp_config
         self._mcp_servers_config = mcp_config.servers if mcp_config else {}
@@ -336,6 +356,25 @@ class PyFlueAgent:
         """Release agent-level resources."""
         await self.close_mcp_servers()
 
+    async def _abort_session_tree(self, session_id: str, *, seen: set[str] | None = None) -> bool:
+        seen = seen or set()
+        if session_id in seen:
+            return False
+        seen.add(session_id)
+        aborted = False
+        for child_id in list(self._active_child_sessions.get(session_id, set())):
+            aborted = await self._abort_session_tree(child_id, seen=seen) or aborted
+        task = self._active_tasks.get(session_id)
+        if task is not None and not task.done():
+            task.cancel()
+            session = PyFlueSession(agent=self, session_id=session_id)
+            await session._emit_event(
+                "abort_requested",
+                operation=self._active_operations.get(session_id),
+            )
+            aborted = True
+        return aborted
+
     async def shell(
         self,
         command: str,
@@ -441,6 +480,7 @@ class PyFlueSession:
             "role": role,
             "cwd": None,
             "children": [],
+            "task_depth": 0,
         }
         safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", session_id)
         self.safe_id = safe_id
@@ -478,6 +518,7 @@ class PyFlueSession:
         """Run one prompt turn."""
         self._begin_operation("prompt")
         try:
+            await self._refresh_context_from_sandbox()
             await self._maybe_auto_compact(model=model)
             prompt = self._build_prompt(text, result=result, role=role)
             await self._append("user", text, source=_source)
@@ -538,6 +579,7 @@ class PyFlueSession:
         self._begin_operation("stream")
         try:
             yield PyFlueEvent("start", {"session_id": self.session_id})
+            await self._refresh_context_from_sandbox()
             await self._maybe_auto_compact(model=model)
             await self._emit_event("agent_start")
             prompt = self._build_prompt(text, role=role)
@@ -605,7 +647,10 @@ class PyFlueSession:
         cwd: str | None = None,
     ) -> HarnessResult | Any:
         """Run a Markdown-defined skill."""
+        await self._refresh_context_from_sandbox()
         skill = self.skills.get(name)
+        if skill is None and _looks_like_skill_path(name):
+            skill = await self._load_skill_by_path(name)
         if skill is None:
             available = ", ".join(sorted(self.skills)) or "(none)"
             raise KeyError(f"Unknown skill '{name}'. Available skills: {available}")
@@ -712,26 +757,42 @@ class PyFlueSession:
         cwd: str | None = None,
     ) -> HarnessResult | Any:
         child_id = task_id or f"{self.session_id}:task:{uuid.uuid4().hex[:10]}"
+        task_depth = await self._task_depth()
+        max_depth = self.agent.config.max_task_depth
+        if max_depth >= 0 and task_depth >= max_depth:
+            raise RuntimeError(
+                f'Max task depth exceeded for session "{self.session_id}". '
+                f"Configured max_task_depth={max_depth}."
+            )
         child = await self.agent.session(child_id, role=role or self.session_role)
         await child._set_task_metadata(
             parent_session_id=self.session_id,
             task_id=child_id,
             role=role or self.session_role,
             cwd=cwd,
+            task_depth=task_depth + 1,
         )
         await self._add_child_session(child_id)
         child.sandbox = _scope_sandbox(self.sandbox, cwd)
         child.python_backend = self.python_backend
         child._set_context_root(_context_root_for_sandbox(child.sandbox) or self.context_root)
-        output = await child.prompt(
-            prompt,
-            result=result,
-            role=role,
-            model=model,
-            secrets=secrets,
-            commands=commands,
-            tools=tools,
-        )
+        self.agent._active_child_sessions.setdefault(self.session_id, set()).add(child_id)
+        try:
+            output = await child.prompt(
+                prompt,
+                result=result,
+                role=role,
+                model=model,
+                secrets=secrets,
+                commands=commands,
+                tools=tools,
+            )
+        finally:
+            children = self.agent._active_child_sessions.get(self.session_id)
+            if children is not None:
+                children.discard(child_id)
+                if not children:
+                    self.agent._active_child_sessions.pop(self.session_id, None)
         await self._append("assistant", f"Subagent {child_id} completed.", source="task")
         return output
 
@@ -855,10 +916,40 @@ class PyFlueSession:
         self._assert_active()
         return self.sandbox.read_file(path)
 
+    async def read_bytes(self, path: str) -> bytes:
+        """Read a file from the session sandbox as bytes."""
+        self._assert_active()
+        return self.sandbox.read_bytes(path)
+
     async def write_file(self, path: str, content: str) -> str:
         """Write a file into the session sandbox."""
         self._assert_active()
         return self.sandbox.write_file(path, content)
+
+    async def write_bytes(self, path: str, content: bytes) -> str:
+        """Write bytes into the session sandbox."""
+        self._assert_active()
+        return self.sandbox.write_bytes(path, content)
+
+    async def stat_file(self, path: str) -> dict[str, Any]:
+        """Return normalized metadata for a sandbox path."""
+        self._assert_active()
+        return _file_info_dict(self.sandbox.stat(path))
+
+    async def exists(self, path: str) -> bool:
+        """Return whether a path exists in the session sandbox."""
+        self._assert_active()
+        return bool(self.sandbox.exists(path))
+
+    async def mkdir(self, path: str, *, recursive: bool = True) -> str:
+        """Create a directory in the session sandbox."""
+        self._assert_active()
+        return self.sandbox.mkdir(path, recursive=recursive)
+
+    async def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> str:
+        """Remove a file or directory from the session sandbox."""
+        self._assert_active()
+        return self.sandbox.rm(path, recursive=recursive, force=force)
 
     async def compact(
         self,
@@ -1083,16 +1174,8 @@ class PyFlueSession:
         self.deleted = True
 
     async def abort(self) -> bool:
-        """Cancel the active operation for this session when one is running."""
-        task = self.agent._active_tasks.get(self.session_id)
-        if task is None or task.done():
-            return False
-        task.cancel()
-        await self._emit_event(
-            "abort_requested",
-            operation=self.agent._active_operations.get(self.session_id),
-        )
-        return True
+        """Cancel the active operation and active child tasks for this session."""
+        return await self.agent._abort_session_tree(self.session_id)
 
     async def delete(self) -> None:
         """Delete this session's persisted state and sandbox files."""
@@ -1240,6 +1323,7 @@ class PyFlueSession:
         task_id: str,
         role: str | None,
         cwd: str | None,
+        task_depth: int,
     ) -> None:
         self.metadata.update(
             {
@@ -1247,9 +1331,14 @@ class PyFlueSession:
                 "task_id": task_id,
                 "role": role,
                 "cwd": cwd,
+                "task_depth": task_depth,
             }
         )
         await self._write_metadata()
+
+    async def _task_depth(self) -> int:
+        metadata = await self._read_persisted_metadata()
+        return int(metadata.get("task_depth") or 0)
 
     async def _add_child_session(self, child_id: str) -> None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -1372,7 +1461,12 @@ class PyFlueSession:
             limit: int | None = None,
         ) -> str:
             """Read a file or list a directory in the session sandbox."""
-            return session.sandbox.read_file(path, offset=offset or 1, limit=limit)
+            content = session.sandbox.read_file(path, offset=offset or 1, limit=limit)
+            return _truncate_tool_text(
+                content,
+                label=f"Read output for {path}",
+                continuation_hint="Use offset and limit to read the next section.",
+            )
 
         async def write(path: str, content: str) -> str:
             """Write content to a file in the session sandbox."""
@@ -1391,6 +1485,22 @@ class PyFlueSession:
                 new_text,
                 replace_all=replace_all,
             )
+
+        async def stat(path: str) -> dict[str, Any]:
+            """Return file or directory metadata from the session sandbox."""
+            return _file_info_dict(session.sandbox.stat(path))
+
+        async def exists(path: str) -> bool:
+            """Return whether a path exists in the session sandbox."""
+            return bool(session.sandbox.exists(path))
+
+        async def mkdir(path: str, recursive: bool = True) -> str:
+            """Create a directory in the session sandbox."""
+            return session.sandbox.mkdir(path, recursive=recursive)
+
+        async def rm(path: str, recursive: bool = False, force: bool = False) -> str:
+            """Remove a file or directory in the session sandbox."""
+            return session.sandbox.rm(path, recursive=recursive, force=force)
 
         async def bash(
             command: str,
@@ -1414,7 +1524,7 @@ class PyFlueSession:
                     command=command_name,
                     exitCode=int(output.get("exit_code", 0) or 0),
                 )
-                return output
+                return _truncate_shell_output(output)
             except Exception as exc:
                 await session._emit_event("command_end", command=command_name, exitCode=-1)
                 await session._emit_event("error", error=str(exc))
@@ -1464,7 +1574,7 @@ class PyFlueSession:
                 await session._emit_event("error", error=str(exc))
                 raise
 
-        return [read, write, edit, bash, grep, glob, task]
+        return [read, write, edit, stat, exists, mkdir, rm, bash, grep, glob, task]
 
     def _validate_tool_names(
         self,
@@ -1613,6 +1723,22 @@ class PyFlueSession:
         self.skills = load_skills(root, None)
         self.roles = load_roles(root, None)
 
+    async def _refresh_context_from_sandbox(self) -> None:
+        discovered = _discover_sandbox_context(self.sandbox)
+        if discovered is None:
+            return
+        instructions, skills = discovered
+        if instructions:
+            self.instructions = instructions
+        if skills:
+            self.skills = {**self.skills, **skills}
+
+    async def _load_skill_by_path(self, name: str) -> Any | None:
+        sandbox_skill = _load_sandbox_skill_by_path(self.sandbox, name)
+        if sandbox_skill is not None:
+            return sandbox_skill
+        return load_skill_by_path(self.context_root, name)
+
     async def _emit_event(self, event_type: str, **data: Any) -> None:
         callback = self.agent.on_event
         if callback is None:
@@ -1686,25 +1812,102 @@ def _extract_structured_text(text: str) -> str:
 def _command_to_tool(command: PyFlueCommand, session: PyFlueSession) -> Any:
     async def run(**kwargs: Any) -> Any:
         if command.callable is not None:
-            result = command.callable(**kwargs)
-            if inspect.isawaitable(result):
-                return await result
-            return result
+            try:
+                result = command.callable(**kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception as exc:
+                return _normalize_command_result(exc)
+            return _normalize_command_result(result)
         if command.command is None:
             raise RuntimeError(f'Command "{command.name}" has no implementation.')
-        return await session.shell(
+        result = await session.shell(
             command.command,
             timeout=command.timeout,
             cwd=command.cwd,
             env=command.env,
             commands=[_shell_command_parts(command.command)[0]],
         )
+        return _normalize_command_result(result)
 
     run.__name__ = command.name
     run.__doc__ = command.description or command.command or f"Run {command.name}."
     if command.schema:
         run.__pyflue_schema__ = command.schema
     return run
+
+
+def _normalize_command_result(result: Any) -> Any:
+    if result is None:
+        return ""
+    if isinstance(result, Exception):
+        return {
+            "error": str(result),
+            "type": type(result).__name__,
+        }
+    if isinstance(result, BaseModel):
+        return result.model_dump()
+    if isinstance(result, (str, int, float, bool, list, tuple, dict)):
+        return result
+    return str(result)
+
+
+def _truncate_shell_output(output: dict[str, Any]) -> dict[str, Any]:
+    truncated = False
+    result = dict(output)
+    for key in ("stdout", "stderr"):
+        value = result.get(key)
+        if not isinstance(value, str):
+            continue
+        text, was_truncated = _truncate_tool_text_parts(
+            value,
+            label=f"Command {key}",
+            continuation_hint="Run a narrower command or redirect output to a file and read it in sections.",
+        )
+        result[key] = text
+        truncated = truncated or was_truncated
+    if truncated:
+        result["truncated"] = True
+    return result
+
+
+def _truncate_tool_text(
+    text: str,
+    *,
+    label: str,
+    continuation_hint: str,
+) -> str:
+    truncated, _ = _truncate_tool_text_parts(
+        text,
+        label=label,
+        continuation_hint=continuation_hint,
+    )
+    return truncated
+
+
+def _truncate_tool_text_parts(
+    text: str,
+    *,
+    label: str,
+    continuation_hint: str,
+) -> tuple[str, bool]:
+    lines = text.splitlines()
+    too_many_lines = len(lines) > MAX_TOOL_OUTPUT_LINES
+    too_many_chars = len(text) > MAX_TOOL_OUTPUT_CHARS
+    if not too_many_lines and not too_many_chars:
+        return text, False
+    selected = lines[:MAX_TOOL_OUTPUT_LINES]
+    truncated = "\n".join(selected)
+    if len(truncated) > MAX_TOOL_OUTPUT_CHARS:
+        truncated = truncated[:MAX_TOOL_OUTPUT_CHARS]
+    omitted_lines = max(len(lines) - len(selected), 0)
+    omitted_chars = max(len(text) - len(truncated), 0)
+    message = (
+        f"\n\n[{label} truncated: "
+        f"{omitted_lines} line(s) and {omitted_chars} character(s) omitted. "
+        f"{continuation_hint}]"
+    )
+    return truncated + message, True
 
 
 def _shell_command_parts(command: str) -> tuple[str, list[str]]:
@@ -1721,6 +1924,106 @@ def _tool_name(tool: Any) -> str:
     return str(getattr(tool, "__name__", None) or getattr(tool, "name", "") or "")
 
 
+def _discover_sandbox_context(sandbox: Any) -> tuple[str, dict[str, Any]] | None:
+    instructions = _read_sandbox_instructions(sandbox)
+    skills = _discover_sandbox_skills(sandbox)
+    if not instructions and not skills:
+        return None
+    listing = _sandbox_directory_listing(sandbox)
+    if listing:
+        instructions = "\n\n".join(
+            part
+            for part in [
+                instructions,
+                "Directory structure:\n" + "\n".join(listing),
+            ]
+            if part
+        )
+    return instructions, skills
+
+
+def _read_sandbox_instructions(sandbox: Any) -> str:
+    parts: list[str] = []
+    for filename in ("AGENTS.md", "CLAUDE.md"):
+        try:
+            content = sandbox.read_file(filename)
+        except Exception:
+            continue
+        if content.strip():
+            parts.append(content.strip())
+    return "\n\n".join(parts)
+
+
+def _discover_sandbox_skills(sandbox: Any) -> dict[str, Any]:
+    skills: dict[str, Any] = {}
+    for path in _iter_sandbox_markdown_paths(sandbox, ".agents/skills"):
+        try:
+            skill = _parse_sandbox_skill(sandbox, path)
+        except Exception:
+            continue
+        skills[skill.name] = skill
+    return skills
+
+
+def _iter_sandbox_markdown_paths(sandbox: Any, root: str) -> list[str]:
+    pending = [root]
+    seen: set[str] = set()
+    markdown: list[str] = []
+    while pending:
+        current = pending.pop(0)
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            entries = sandbox.list_files(current)
+        except Exception:
+            continue
+        for entry in entries:
+            path = str(getattr(entry, "path", ""))
+            if not path:
+                continue
+            normalized = path.removeprefix("/")
+            if bool(getattr(entry, "is_dir", False)):
+                pending.append(normalized)
+            elif normalized.lower().endswith((".md", ".markdown")):
+                markdown.append(normalized)
+    return sorted(markdown)
+
+
+def _parse_sandbox_skill(sandbox: Any, path: str) -> Any:
+    content = sandbox.read_file(path)
+    parts = Path(path).parts
+    default_name = Path(path).stem
+    if Path(path).name.upper() == "SKILL.MD" and len(parts) >= 2:
+        default_name = parts[-2]
+    return parse_skill_text(content, default_name=default_name)
+
+
+def _load_sandbox_skill_by_path(sandbox: Any, rel_path: str) -> Any | None:
+    normalized = str(Path(rel_path).as_posix()).lstrip("/")
+    if normalized.startswith(".."):
+        raise ValueError(f"Skill path escapes skills directory: {rel_path}")
+    path = f".agents/skills/{normalized}"
+    try:
+        return _parse_sandbox_skill(sandbox, path)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _sandbox_directory_listing(sandbox: Any) -> list[str]:
+    try:
+        entries = sandbox.list_files(".")
+    except Exception:
+        return []
+    return sorted(str(getattr(entry, "path", "")).removeprefix("/") for entry in entries)
+
+
+def _looks_like_skill_path(name: str) -> bool:
+    return "/" in name or name.lower().endswith((".md", ".markdown"))
+
+
 def _scope_sandbox(sandbox: Any, cwd: str | None) -> Any:
     if not cwd:
         return sandbox
@@ -1735,6 +2038,16 @@ def _scope_sandbox(sandbox: Any, cwd: str | None) -> Any:
 def _context_root_for_sandbox(sandbox: Any) -> Path | None:
     root = getattr(sandbox, "root", None)
     return root if isinstance(root, Path) else None
+
+
+def _file_info_dict(info: Any) -> dict[str, Any]:
+    return {
+        "path": info.path,
+        "is_dir": bool(info.is_dir),
+        "is_file": bool(getattr(info, "is_file", False)),
+        "size": int(info.size or 0),
+        "mtime": getattr(info, "mtime", None),
+    }
 
 
 class _ScopedSandbox:
@@ -1765,11 +2078,29 @@ class _ScopedSandbox:
     def list_files(self, path: str = ".") -> Any:
         return self.base.list_files(self._path(path))
 
+    def stat(self, path: str) -> Any:
+        return self.base.stat(self._path(path))
+
+    def exists(self, path: str) -> bool:
+        return bool(self.base.exists(self._path(path)))
+
     def read_file(self, path: str, *, offset: int = 1, limit: int | None = None) -> str:
         return self.base.read_file(self._path(path), offset=offset, limit=limit)
 
+    def read_bytes(self, path: str) -> bytes:
+        return self.base.read_bytes(self._path(path))
+
     def write_file(self, path: str, content: str) -> str:
         return self.base.write_file(self._path(path), content)
+
+    def write_bytes(self, path: str, content: bytes) -> str:
+        return self.base.write_bytes(self._path(path), content)
+
+    def mkdir(self, path: str, *, recursive: bool = True) -> str:
+        return self.base.mkdir(self._path(path), recursive=recursive)
+
+    def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> str:
+        return self.base.rm(self._path(path), recursive=recursive, force=force)
 
     def edit_file(self, path: str, old: str, new: str, *, replace_all: bool = False) -> str:
         return self.base.edit_file(self._path(path), old, new, replace_all=replace_all)

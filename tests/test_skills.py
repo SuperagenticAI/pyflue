@@ -3,6 +3,7 @@ from __future__ import annotations
 from pyflue.skills import (
     load_project_instructions,
     load_roles,
+    load_skill_by_path,
     load_skills,
     parse_skill,
     render_skill_prompt,
@@ -66,6 +67,21 @@ def test_load_deepagents_style_skill_directories(tmp_path):
 
     assert sorted(skills) == ["plan", "review"]
     assert skills["review"].instructions == "Review code."
+
+
+def test_load_skill_by_relative_path(tmp_path):
+    skills_dir = tmp_path / ".agents" / "skills" / "triage"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "reproduce.md").write_text(
+        "---\nname: reproduce\n---\nReproduce the issue.",
+        encoding="utf-8",
+    )
+
+    skill = load_skill_by_path(tmp_path, "triage/reproduce.md")
+
+    assert skill is not None
+    assert skill.name == "reproduce"
+    assert skill.instructions == "Reproduce the issue."
 
 
 def test_load_project_instructions(tmp_path):

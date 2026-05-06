@@ -1,6 +1,6 @@
 """PyFlue public API."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from pyflue.client import PyFlueClient
 from pyflue.core import PyFlueAgent, PyFlueSession, PyFlueSessions, init
@@ -28,6 +28,7 @@ from pyflue.types import (
     PyFlueConfig,
     PyFlueEvent,
     PyFlueEventCallback,
+    define_command,
 )
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "Role",
     "Skill",
     "discover_agent_routes",
+    "define_command",
     "init",
     "load_roles",
     "load_skills",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob as globlib
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -45,14 +46,15 @@ class VirtualSandbox:
     def list_files(self, path: str = ".") -> list[SandboxFileInfo]:
         target = self.resolve(path)
         paths = [target] if target.is_file() else sorted(target.iterdir())
-        return [
-            SandboxFileInfo(
-                path=self.to_backend_path(child),
-                is_dir=child.is_dir(),
-                size=0 if child.is_dir() else child.stat().st_size,
-            )
-            for child in paths
-        ]
+        return [self._file_info(child) for child in paths]
+
+    def stat(self, path: str) -> SandboxFileInfo:
+        """Return normalized metadata for a file or directory."""
+        return self._file_info(self.resolve(path))
+
+    def exists(self, path: str) -> bool:
+        """Return whether a path exists inside the sandbox."""
+        return self.resolve(path, must_exist=False).exists()
 
     def read_file(self, path: str, *, offset: int = 1, limit: int | None = None) -> str:
         target = self.resolve(path)
@@ -63,12 +65,50 @@ class VirtualSandbox:
         selected = lines[start : start + limit if limit else None]
         return "\n".join(selected)
 
+    def read_bytes(self, path: str) -> bytes:
+        """Read a file as bytes."""
+        target = self.resolve(path)
+        if target.is_dir():
+            raise IsADirectoryError(path)
+        return target.read_bytes()
+
     def write_file(self, path: str, content: str) -> str:
         require_write(self.policy)
         target = self.resolve(path, must_exist=False)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"Wrote {self.relative(target)}"
+
+    def write_bytes(self, path: str, content: bytes) -> str:
+        """Write bytes to a file."""
+        require_write(self.policy)
+        target = self.resolve(path, must_exist=False)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return f"Wrote {self.relative(target)}"
+
+    def mkdir(self, path: str, *, recursive: bool = True) -> str:
+        """Create a directory inside the sandbox."""
+        require_write(self.policy)
+        target = self.resolve(path, must_exist=False)
+        target.mkdir(parents=recursive, exist_ok=recursive)
+        return f"Created {self.relative(target)}"
+
+    def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> str:
+        """Remove a file or directory inside the sandbox."""
+        require_write(self.policy)
+        target = self.resolve(path, must_exist=False)
+        if not target.exists():
+            if force:
+                return f"Removed {self.relative(target)}"
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            if not recursive:
+                raise IsADirectoryError(path)
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        return f"Removed {self.relative(target)}"
 
     def edit_file(self, path: str, old: str, new: str, *, replace_all: bool = False) -> str:
         require_write(self.policy)
@@ -153,3 +193,13 @@ class VirtualSandbox:
     def to_backend_path(self, path: Path) -> str:
         rel = self.relative(path)
         return "/" if not rel else "/" + rel
+
+    def _file_info(self, path: Path) -> SandboxFileInfo:
+        stat = path.stat()
+        return SandboxFileInfo(
+            path=self.to_backend_path(path),
+            is_dir=path.is_dir(),
+            is_file=path.is_file(),
+            size=0 if path.is_dir() else stat.st_size,
+            mtime=stat.st_mtime,
+        )

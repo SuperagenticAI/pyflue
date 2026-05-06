@@ -77,6 +77,16 @@ Use a specific config file:
 pyflue routes --config pyflue.toml
 ```
 
+## `pyflue invoke`
+
+Invoke a file-based route locally without starting the development server:
+
+```bash
+pyflue invoke default demo --payload '{"prompt": "Hello"}'
+```
+
+The first argument is the route name. The second argument is the agent id.
+
 ## `pyflue add`
 
 Print connector setup instructions for a coding agent.
@@ -135,7 +145,7 @@ Available targets:
 | `fly` | Implemented | `Dockerfile`, `app.py`, `fly.toml` |
 | `vercel` | Implemented | `Dockerfile`, `app.py`, `vercel.json` |
 | `netlify` | Implemented | `Dockerfile`, `app.py`, `netlify.toml` |
-| `cloudflare` | Partial | `wrangler.toml` |
+| `cloudflare` | Beta | `Dockerfile`, `app.py`, `worker.ts`, `wrangler.jsonc`, `package.json` |
 
 The `uvicorn`, `lambda`, `cloudrun`, and `docker` targets use the workspace
 build system. It discovers agent files recursively under `agents/` or
@@ -146,8 +156,16 @@ build system. It discovers agent files recursively under `agents/` or
 Start the local development server with reload:
 
 ```bash
-pyflue dev --port 2024
+pyflue dev --port 2024 --env .env
 ```
+
+The dev server watches `pyflue.toml`, Python route files, Markdown skills, and
+Markdown roles under the configured workspace. The status endpoint includes
+route metadata, file modification times, loaded skills, loaded roles, and active
+sessions so route changes are visible without reading server logs.
+
+Use `--env` to load default environment values from one or more `.env` files.
+Variables already set in the shell are preserved.
 
 The server exposes:
 
@@ -161,6 +179,9 @@ POST /prompt/{agent_id}
 POST /prompt/{agent_id}/events
 POST /sessions/{session_id}/abort
 ```
+
+Webhook errors return a stable JSON envelope with `error.type`,
+`error.message`, and `error.details`.
 
 ## `pyflue deploy`
 

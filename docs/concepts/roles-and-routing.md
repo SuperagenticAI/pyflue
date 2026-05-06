@@ -75,6 +75,21 @@ curl http://127.0.0.1:2024/agents/code/default \
   -d '{"payload": {"prompt": "Review this repository"}}'
 ```
 
+HTTP errors use a stable JSON envelope:
+
+```json
+{
+  "error": {
+    "type": "agent_not_found",
+    "message": "Agent \"missing\" is not registered.",
+    "details": "Verify the agent name is correct."
+  }
+}
+```
+
+The server validates request method, JSON content type, JSON body shape,
+registered agent names, and webhook trigger settings.
+
 Secrets are available to host code through `context.env`, but PyFlue does not
 inject those values into prompts.
 

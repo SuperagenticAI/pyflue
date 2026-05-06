@@ -37,6 +37,19 @@ await session.prompt("Now suggest the smallest fix")
 The second prompt includes the recent conversation so the harness can continue
 from the same context.
 
+## Runtime Context
+
+Before prompt, stream, and skill calls, PyFlue checks the active sandbox for:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.agents/skills/**/*.md`
+- `.agents/skills/<name>/SKILL.md`
+
+When present, these sandbox files update the system prompt and available skills
+for the call. This is useful for child tasks scoped with `cwd` and for
+workspaces prepared by tools before the model turn.
+
 ## Automatic Compaction
 
 PyFlue compacts long sessions automatically when the estimated history size
@@ -71,7 +84,13 @@ Compaction emits `compaction_start` and `compaction_end` through `on_event`.
 | `subagent(prompt, result=None, cwd=None)` | Implemented | Alias-style helper for child sessions. |
 | `shell(command, timeout=120, cwd=None, env=None)` | Implemented | Run shell through sandbox policy. |
 | `read_file(path)` | Implemented | Read a sandbox file. |
+| `read_bytes(path)` | Implemented | Read a sandbox file as bytes. |
 | `write_file(path, content)` | Implemented | Write a sandbox file when enabled. |
+| `write_bytes(path, content)` | Implemented | Write bytes to a sandbox file when enabled. |
+| `stat_file(path)` | Implemented | Return normalized file or directory metadata. |
+| `exists(path)` | Implemented | Check whether a sandbox path exists. |
+| `mkdir(path, recursive=True)` | Implemented | Create a sandbox directory when enabled. |
+| `rm(path, recursive=False, force=False)` | Implemented | Remove a sandbox file or directory when enabled. |
 
 ## Built-In Prompt Tools
 
@@ -82,6 +101,10 @@ Every prompt receives built-in tools backed by the session sandbox:
 | `read` | Read a file or list a directory. |
 | `write` | Write a file when write policy allows it. |
 | `edit` | Replace exact text in a file. |
+| `stat` | Return file or directory metadata. |
+| `exists` | Check whether a path exists. |
+| `mkdir` | Create a directory when write policy allows it. |
+| `rm` | Remove a file or directory when write policy allows it. |
 | `bash` | Run a shell command when shell policy allows it. Supports `cwd` and `env`. |
 | `grep` | Search files by regular expression. |
 | `glob` | Find files by glob pattern. |
@@ -122,3 +145,7 @@ scoped directory, so package-specific instructions can guide the child task.
 Task sessions store parent and child metadata. Calling
 `agent.sessions.delete(...)` on a parent session removes the recorded child task
 tree as well as the parent session state.
+
+Nested tasks are limited by `max_task_depth`, which defaults to `8`. Calling
+`session.abort()` on a parent session also requests cancellation for active
+child task sessions.

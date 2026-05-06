@@ -105,16 +105,91 @@ def write_deploy_artifacts(target: DeployTarget = "docker", root: str | Path = "
         )
         return [*paths, path]
     if target == "cloudflare":
-        path = base / "wrangler.toml"
-        path.write_text(
-            'name = "pyflue-agent"\n'
-            'main = "app.py"\n'
-            'compatibility_date = "2026-05-03"\n\n'
-            "# Python server deployment on Cloudflare requires Workers Python runtime support\n"
-            "# or a containerized Cloudflare target.\n",
+        paths = _write_docker_artifacts(base)
+        worker = base / "worker.ts"
+        wrangler = base / "wrangler.jsonc"
+        package = base / "package.json"
+        worker.write_text(
+            'import { Container } from "@cloudflare/containers";\n\n'
+            "export class PyFlueContainer extends Container {\n"
+            "  defaultPort = 8000;\n"
+            '  sleepAfter = "10m";\n'
+            "}\n\n"
+            "export default {\n"
+            "  async fetch(request: Request, env: Env): Promise<Response> {\n"
+            "    const url = new URL(request.url);\n"
+            '    const name = url.pathname.startsWith("/agents/")\n'
+            '      ? url.pathname.split("/").slice(0, 4).join("/")\n'
+            '      : "default";\n'
+            "    const container = env.PYFLUE_CONTAINER.getByName(name);\n"
+            "    return container.fetch(request);\n"
+            "  },\n"
+            "};\n\n"
+            "interface Env {\n"
+            "  PYFLUE_CONTAINER: DurableObjectNamespace<PyFlueContainer> & {\n"
+            "    getByName(name: string): DurableObjectStub;\n"
+            "  };\n"
+            "}\n",
             encoding="utf-8",
         )
-        return [path]
+        wrangler.write_text(
+            json.dumps(
+                {
+                    "$schema": "node_modules/wrangler/config-schema.json",
+                    "name": "pyflue-agent",
+                    "main": "worker.ts",
+                    "compatibility_date": "2026-05-06",
+                    "containers": [
+                        {
+                            "class_name": "PyFlueContainer",
+                            "image": "./Dockerfile",
+                            "max_instances": 3,
+                            "instance_type": "basic",
+                        }
+                    ],
+                    "durable_objects": {
+                        "bindings": [
+                            {
+                                "name": "PYFLUE_CONTAINER",
+                                "class_name": "PyFlueContainer",
+                            }
+                        ]
+                    },
+                    "migrations": [
+                        {
+                            "tag": "v1",
+                            "new_sqlite_classes": ["PyFlueContainer"],
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        package.write_text(
+            json.dumps(
+                {
+                    "private": True,
+                    "type": "module",
+                    "scripts": {
+                        "dev": "wrangler dev",
+                        "deploy": "wrangler deploy",
+                    },
+                    "dependencies": {
+                        "@cloudflare/containers": "^0.0.19",
+                    },
+                    "devDependencies": {
+                        "wrangler": "^4.0.0",
+                        "typescript": "^5.0.0",
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return [*paths, worker, wrangler, package]
     raise ValueError(f"Unknown deployment target: {target}")
 
 
@@ -158,6 +233,8 @@ def _provider_command(target: DeployTarget) -> list[str] | None:
         return ["vercel", "deploy"]
     if target == "netlify":
         return ["netlify", "deploy"]
+    if target == "cloudflare":
+        return ["wrangler", "deploy"]
     return None
 
 

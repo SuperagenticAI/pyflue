@@ -20,6 +20,25 @@ await session.write_file("report.txt", "Repository summary")
 
 Without `allow_write=True`, writes raise `PermissionError`.
 
+## Manage Files
+
+```python
+agent = await init(allow_write=True)
+session = await agent.session()
+
+await session.mkdir("reports")
+exists = await session.exists("reports")
+metadata = await session.stat_file("reports")
+await session.rm("reports", recursive=True)
+```
+
+Use `read_bytes` and `write_bytes` for binary files:
+
+```python
+data = await session.read_bytes("asset.png")
+await session.write_bytes("asset-copy.png", data)
+```
+
 ## Run Shell Commands
 
 ```python

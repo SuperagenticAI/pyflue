@@ -5,7 +5,7 @@ The Python API centers on `init`, `PyFlueAgent`, and `PyFlueSession`.
 ## `init`
 
 ```python
-from pyflue import PyFlueCommand, init
+from pyflue import PyFlueCommand, define_command, init
 
 agent = await init(
     model="openai:gpt-5.5",
@@ -25,6 +25,7 @@ agent = await init(
             command="pytest -q",
             timeout=300,
         ),
+        define_command("lint", "ruff check ."),
     ),
     tools=[],
     on_event=lambda event: print(event.type, event.data),
@@ -47,6 +48,7 @@ Parameters:
 | `allow_shell` | `bool` | `False` | Enable sandbox shell execution. |
 | `allowed_commands` | `tuple[str, ...] \| list[str] \| None` | config value | Optional command grant list. |
 | `allow_compound_commands` | `bool \| None` | config value | Allow shell operators and redirects. |
+| `max_task_depth` | `int \| None` | config value | Maximum nested child task depth. |
 | `commands` | `tuple[str \| PyFlueCommand, ...] \| list[str \| PyFlueCommand] \| None` | `None` | Agent-wide command grants and structured command tools. |
 | `tools` | `list[Any] \| tuple[Any, ...] \| None` | `None` | Agent-wide custom tools available to every prompt, skill, and task call. |
 | `providers` | `dict[str, dict] \| None` | config value | Provider endpoint, header, and API key overrides. |
@@ -175,8 +177,9 @@ aborted = await session.abort()
 ```
 
 `abort()` returns `True` when an active prompt, stream, task, or shell operation
-was cancelled. It returns `False` when the session is already idle. Cancellation
-emits `abort_requested` and `aborted` events through `on_event`.
+was cancelled. It also cancels active child task sessions started by the
+session. It returns `False` when the session is already idle. Cancellation emits
+`abort_requested` and `aborted` events through `on_event`.
 
 ## `PyFlueSession.subagent`
 
@@ -221,6 +224,10 @@ Prompt calls automatically expose sandbox-backed tools to the harness:
 | `read(path, offset=None, limit=None)` | Read a file or list a directory. |
 | `write(path, content)` | Write a file when write policy allows it. |
 | `edit(path, old_text, new_text, replace_all=False)` | Replace exact text in a file. |
+| `stat(path)` | Return file or directory metadata. |
+| `exists(path)` | Check whether a path exists. |
+| `mkdir(path, recursive=True)` | Create a directory when write policy allows it. |
+| `rm(path, recursive=False, force=False)` | Remove a file or directory when write policy allows it. |
 | `bash(command, timeout=120, cwd=None, env=None)` | Run a shell command when shell policy allows it. |
 | `grep(pattern, path=".", include=None)` | Search files by regular expression. |
 | `glob(pattern)` | Find files by glob pattern. |
@@ -290,6 +297,29 @@ agent = await init(
 
 Shell command objects support `cwd`, `env`, and `timeout`.
 
+`define_command` is a shorter helper for common cases:
+
+```python
+agent = await init(
+    commands=[
+        define_command("test", "pytest -q", timeout=300),
+        define_command("lookup_issue", lookup_issue),
+        define_command(
+            "lint",
+            {
+                "description": "Run lint checks.",
+                "command": "ruff check .",
+            },
+        ),
+    ],
+)
+```
+
+Callable commands normalize common return values before they are sent back to
+the harness. `None` becomes an empty string, Pydantic models become
+dictionaries, exceptions become structured error dictionaries, and shell
+commands return the sandbox result with `stdout`, `stderr`, and `exit_code`.
+
 ## Events
 
 Pass `on_event` to `init` or `PyFlueAgent` to observe session activity:
@@ -335,9 +365,20 @@ result = await session.run_python(
 ```python
 content = await session.read_file("README.md")
 await session.write_file("report.txt", "Summary")
+metadata = await session.stat_file("report.txt")
+exists = await session.exists("report.txt")
+await session.mkdir("reports")
+await session.rm("reports", recursive=True)
 ```
 
-Writes require `allow_write=True`.
+Writes, directory creation, and removal require `allow_write=True`.
+
+Binary-safe helpers are available when a workflow needs exact bytes:
+
+```python
+data = await session.read_bytes("image.png")
+await session.write_bytes("copy.png", data)
+```
 
 ## Shell Helper
 

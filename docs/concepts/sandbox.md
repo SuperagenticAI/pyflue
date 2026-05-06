@@ -35,8 +35,14 @@ pyflue run \
 
 | Tool | Status | Description |
 | --- | --- | --- |
+| `stat` | Implemented | Return normalized metadata for a file or directory. |
+| `exists` | Implemented | Check whether a sandbox path exists. |
 | `read_file` | Implemented | Read a file or list a directory. |
+| `read_bytes` | Implemented | Read a file as bytes. |
 | `write_file` | Implemented | Write text to a file when writes are enabled. |
+| `write_bytes` | Implemented | Write bytes to a file when writes are enabled. |
+| `mkdir` | Implemented | Create a directory when writes are enabled. |
+| `rm` | Implemented | Remove a file or directory when writes are enabled. |
 | `edit_file` | Implemented | Replace exact text in a file. |
 | `grep` | Implemented | Search files with a regex. |
 | `glob` | Implemented | Find files by glob pattern. |
@@ -96,6 +102,27 @@ Remote sandboxes expose the same high-level PyFlue tools. File operations are
 implemented through shell commands inside the provider sandbox, so the remote
 environment must include standard Linux tools such as `bash`, `python`, `cat`,
 `grep`, `glob`, and `base64`.
+
+## Metadata And File Management
+
+Session helpers provide common filesystem operations:
+
+```python
+metadata = await session.stat_file("report.txt")
+exists = await session.exists("report.txt")
+await session.mkdir("reports/archive")
+await session.rm("reports/archive", recursive=True)
+```
+
+`stat_file` returns a dictionary with `path`, `is_dir`, `is_file`, `size`, and
+`mtime`.
+
+Use binary helpers for files that should not be decoded as UTF-8:
+
+```python
+data = await session.read_bytes("asset.png")
+await session.write_bytes("asset-copy.png", data)
+```
 
 ## Path Boundary
 

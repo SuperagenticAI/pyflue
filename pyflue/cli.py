@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from rich.console import Console
 from pyflue import init
 from pyflue._builder import build as build_agent
 from pyflue._builder import resolve_workspace_from_cwd
+from pyflue.config import load_config
 from pyflue.connectors import (
     render_add_prompt,
     render_connector_listing,
@@ -32,6 +34,8 @@ ALLOW_SHELL_OPTION = typer.Option(False, "--allow-shell")
 PORT_OPTION = typer.Option(2024, "--port")
 WORKSPACE_OPTION = typer.Option(None, "--workspace", "-w")
 OUTPUT_OPTION = typer.Option(None, "--output", "-o")
+PAYLOAD_OPTION = typer.Option("{}", "--payload", help="JSON payload for a local route call.")
+ENV_OPTION = typer.Option(None, "--env", help="Load defaults from a .env file.")
 PROJECT_NAME_ARGUMENT = typer.Argument("pyflue-agent")
 SKILL_NAME_ARGUMENT = typer.Argument(...)
 BuildTarget = Literal[
@@ -130,7 +134,11 @@ def run(
 
 
 @app.command()
-def dev(port: int = PORT_OPTION, config: Path = CONFIG_OPTION) -> None:
+def dev(
+    port: int = PORT_OPTION,
+    config: Path = CONFIG_OPTION,
+    env: list[Path] | None = ENV_OPTION,
+) -> None:
     """Start a development server with hot-reload support."""
     try:
         import uvicorn
@@ -138,16 +146,25 @@ def dev(port: int = PORT_OPTION, config: Path = CONFIG_OPTION) -> None:
         raise typer.BadParameter(
             "pyflue dev requires server dependencies. Install with: pip install 'pyflue[server]'"
         ) from exc
+    loaded = load_config(config)
+    loaded_env = _load_env_files(env or [])
+    reload_dirs = _dev_reload_dirs(loaded.root, loaded.agents_dir, loaded.skills_dir, loaded.roles_dir)
+    os.environ["PYFLUE_CONFIG"] = str(config.resolve())
     console.print(f"Starting PyFlue dev server on http://127.0.0.1:{port}")
     console.print(f"Dashboard: http://127.0.0.1:{port}/__pyflue")
     console.print(f"Status: http://127.0.0.1:{port}/__pyflue/status")
+    console.print("Watching: " + ", ".join(str(path) for path in reload_dirs))
+    if loaded_env:
+        console.print("Loaded env defaults: " + ", ".join(str(path) for path in loaded_env))
     uvicorn.run(
         "pyflue.server:create_app",
         factory=True,
         host="127.0.0.1",
         port=port,
         reload=True,
-        app_dir=str(config.parent.resolve()),
+        reload_dirs=[str(path) for path in reload_dirs],
+        reload_includes=["*.py", "*.md", "*.toml"],
+        app_dir=str(loaded.root),
     )
 
 
@@ -164,6 +181,33 @@ def routes(config: Path = CONFIG_OPTION) -> None:
         for route in discovered.values()
     ]
     console.print_json(data={"agents": rows})
+
+
+@app.command("invoke")
+def invoke_route_command(
+    name: str = typer.Argument(..., help="Agent route name."),
+    agent_id: str = typer.Argument("default", help="Agent/session id for the route call."),
+    payload: str = PAYLOAD_OPTION,
+    config: Path = CONFIG_OPTION,
+) -> None:
+    """Invoke a file-based agent route locally."""
+    from pyflue.routing import discover_agent_routes, invoke_route
+
+    async def _invoke() -> None:
+        loaded = load_config(config)
+        discovered = discover_agent_routes(loaded.root, loaded.agents_dir)
+        if name not in discovered:
+            available = ", ".join(sorted(discovered)) or "(none)"
+            raise typer.BadParameter(f"Unknown route: {name}. Available routes: {available}")
+        result = await invoke_route(
+            discovered[name],
+            agent_id=agent_id,
+            payload=_parse_payload(payload),
+            config_path=config,
+        )
+        console.print_json(data=result if isinstance(result, dict) else {"result": result})
+
+    asyncio.run(_invoke())
 
 
 @app.command()
@@ -339,6 +383,62 @@ def _write_gitlab_ci() -> None:
         "    - uv run pyflue run --allow-shell --prompt \"$PROMPT\"\n",
         encoding="utf-8",
     )
+
+
+def _dev_reload_dirs(
+    root: Path,
+    agents_dir: Path | None,
+    skills_dir: Path | None,
+    roles_dir: Path | None,
+) -> list[Path]:
+    candidates = [
+        root,
+        agents_dir or root / "agents",
+        root / ".agents",
+        skills_dir or root / ".agents" / "skills",
+        roles_dir or root / ".agents" / "roles",
+    ]
+    result: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved.exists() and resolved not in result:
+            result.append(resolved)
+    return result or [root.resolve()]
+
+
+def _load_env_files(paths: list[Path]) -> list[Path]:
+    loaded: list[Path] = []
+    merged: dict[str, str] = {}
+    for raw_path in paths:
+        path = raw_path.expanduser().resolve()
+        if not path.exists():
+            raise typer.BadParameter(f"Env file does not exist: {path}")
+        merged.update(_parse_env_file(path))
+        loaded.append(path)
+    for key, value in merged.items():
+        os.environ.setdefault(key, value)
+    return loaded
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line_no, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line.removeprefix("export ").strip()
+        key, sep, value = line.partition("=")
+        if not sep or not key.strip():
+            raise typer.BadParameter(f"Invalid env line in {path}:{line_no}")
+        values[key.strip()] = _strip_env_value(value.strip())
+    return values
+
+
+def _strip_env_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 def _parse_payload(payload: str | None) -> dict[str, Any]:

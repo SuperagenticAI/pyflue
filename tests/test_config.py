@@ -9,6 +9,7 @@ def test_load_config_parses_providers_compaction_and_mcp(tmp_path):
         """
 [agent]
 model = "openai:gpt-4o"
+max_task_depth = 4
 
 [providers.openai]
 base_url = "https://gateway.example/v1"
@@ -47,6 +48,7 @@ args = ["server.py"]
     assert config.compaction.context_window_tokens == 1000
     assert config.compaction.reserve_tokens == 100
     assert config.compaction.keep_recent_tokens == 200
+    assert config.max_task_depth == 4
     assert config.mcp is not None
     assert config.mcp.mode == "search_execute"
     assert config.mcp.search_limit == 3

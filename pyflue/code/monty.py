@@ -179,25 +179,21 @@ class _SandboxOSAccess:
         return default
 
     def path_exists(self, path: Any) -> bool:
-        try:
-            self.sandbox.list_files(str(path))
-        except Exception:
-            return False
-        return True
+        return self.sandbox.exists(str(path))
 
     def path_is_file(self, path: Any) -> bool:
         try:
-            entries = self.sandbox.list_files(str(path))
+            info = self.sandbox.stat(str(path))
         except Exception:
             return False
-        return len(entries) == 1 and not entries[0].is_dir
+        return bool(info.is_file)
 
     def path_is_dir(self, path: Any) -> bool:
         try:
-            entries = self.sandbox.list_files(str(path))
+            info = self.sandbox.stat(str(path))
         except Exception:
             return False
-        return bool(entries) and entries[0].is_dir
+        return bool(info.is_dir)
 
     def path_iterdir(self, path: Any) -> list[Any]:
         from pathlib import PurePosixPath
@@ -208,30 +204,30 @@ class _SandboxOSAccess:
         return self.sandbox.read_file(str(path))
 
     def path_read_bytes(self, path: Any) -> bytes:
-        return self.sandbox.read_file(str(path)).encode()
+        return self.sandbox.read_bytes(str(path))
 
     def path_write_text(self, path: Any, data: str) -> int:
         self.sandbox.write_file(str(path), data)
         return len(data)
 
     def path_write_bytes(self, path: Any, data: bytes) -> int:
-        self.sandbox.write_file(str(path), data.decode("utf-8", errors="replace"))
+        self.sandbox.write_bytes(str(path), data)
         return len(data)
 
     def path_mkdir(self, path: Any, parents: bool, exist_ok: bool) -> None:
-        command = "mkdir "
-        if parents:
-            command += "-p "
-        command += _quote(str(path))
         if exist_ok:
-            command += " || true"
-        self.sandbox.shell(command)
+            try:
+                if self.sandbox.stat(str(path)).is_dir:
+                    return
+            except Exception:
+                pass
+        self.sandbox.mkdir(str(path), recursive=parents)
 
     def path_unlink(self, path: Any) -> None:
-        self.sandbox.shell(f"rm {_quote(str(path))}")
+        self.sandbox.rm(str(path))
 
     def path_rmdir(self, path: Any) -> None:
-        self.sandbox.shell(f"rmdir {_quote(str(path))}")
+        self.sandbox.rm(str(path), recursive=True)
 
     def path_resolve(self, path: Any) -> str:
         return str(path)
@@ -243,16 +239,9 @@ class _SandboxOSAccess:
         return False
 
     def path_rename(self, path: Any, target: Any) -> None:
-        content = self.sandbox.read_file(str(path))
-        self.sandbox.write_file(str(target), content)
-        self.sandbox.shell(f"rm {_quote(str(path))}")
-
-
-def _quote(value: str) -> str:
-    import shlex
-
-    return shlex.quote(value)
-
+        content = self.sandbox.read_bytes(str(path))
+        self.sandbox.write_bytes(str(target), content)
+        self.sandbox.rm(str(path))
 
 def _resource_limits(
     resource_limits_type: Any,

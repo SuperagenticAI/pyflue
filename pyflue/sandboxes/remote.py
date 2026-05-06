@@ -35,7 +35,15 @@ class ShellSandboxMixin:
             "    paths = [path]\n"
             "entries = []\n"
             "for item in paths:\n"
-            "    entries.append({'path': item, 'is_dir': os.path.isdir(item), 'size': 0 if os.path.isdir(item) else os.path.getsize(item)})\n"
+            "    stat = os.stat(item)\n"
+            "    is_dir = os.path.isdir(item)\n"
+            "    entries.append({\n"
+            "        'path': item,\n"
+            "        'is_dir': is_dir,\n"
+            "        'is_file': os.path.isfile(item),\n"
+            "        'size': 0 if is_dir else stat.st_size,\n"
+            "        'mtime': stat.st_mtime,\n"
+            "    })\n"
             "print(json.dumps(entries))\n"
             "PY"
         )
@@ -46,10 +54,51 @@ class ShellSandboxMixin:
             SandboxFileInfo(
                 path=self._public_path(str(item["path"])),
                 is_dir=bool(item.get("is_dir")),
+                is_file=bool(item.get("is_file")),
                 size=int(item.get("size") or 0),
+                mtime=float(item["mtime"]) if item.get("mtime") is not None else None,
             )
             for item in json.loads(result["stdout"] or "[]")
         ]
+
+    def stat(self, path: str) -> SandboxFileInfo:
+        script = (
+            "python - <<'PY'\n"
+            "import json, os, sys\n"
+            f"path = {self._remote_path(path)!r}\n"
+            "stat = os.stat(path)\n"
+            "is_dir = os.path.isdir(path)\n"
+            "print(json.dumps({\n"
+            "    'path': path,\n"
+            "    'is_dir': is_dir,\n"
+            "    'is_file': os.path.isfile(path),\n"
+            "    'size': 0 if is_dir else stat.st_size,\n"
+            "    'mtime': stat.st_mtime,\n"
+            "}))\n"
+            "PY"
+        )
+        result = self._run_unchecked(script)
+        if result["exit_code"] != 0:
+            raise RuntimeError(result["stderr"] or result["stdout"])
+        item = json.loads(result["stdout"])
+        return SandboxFileInfo(
+            path=self._public_path(str(item["path"])),
+            is_dir=bool(item.get("is_dir")),
+            is_file=bool(item.get("is_file")),
+            size=int(item.get("size") or 0),
+            mtime=float(item["mtime"]) if item.get("mtime") is not None else None,
+        )
+
+    def exists(self, path: str) -> bool:
+        script = (
+            "python - <<'PY'\n"
+            "import os, sys\n"
+            f"path = {self._remote_path(path)!r}\n"
+            "sys.exit(0 if os.path.exists(path) else 1)\n"
+            "PY"
+        )
+        result = self._run_unchecked(script)
+        return result["exit_code"] == 0
 
     def read_file(self, path: str, *, offset: int = 1, limit: int | None = None) -> str:
         command = f"cat {shlex.quote(self._remote_path(path))}"
@@ -60,6 +109,20 @@ class ShellSandboxMixin:
         start = max(offset - 1, 0)
         selected = lines[start : start + limit if limit else None]
         return "\n".join(selected)
+
+    def read_bytes(self, path: str) -> bytes:
+        command = (
+            "python - <<'PY'\n"
+            "import base64\n"
+            f"path = {self._remote_path(path)!r}\n"
+            "with open(path, 'rb') as file:\n"
+            "    print(base64.b64encode(file.read()).decode('ascii'))\n"
+            "PY"
+        )
+        result = self._run_unchecked(command)
+        if result["exit_code"] != 0:
+            raise RuntimeError(result["stderr"] or result["stdout"])
+        return base64.b64decode(result["stdout"])
 
     def write_file(self, path: str, content: str) -> str:
         require_write(self.policy)
@@ -73,6 +136,43 @@ class ShellSandboxMixin:
         if result["exit_code"] != 0:
             raise RuntimeError(result["stderr"] or result["stdout"])
         return f"Wrote {self._public_path(remote)}"
+
+    def write_bytes(self, path: str, content: bytes) -> str:
+        require_write(self.policy)
+        encoded = base64.b64encode(content).decode("ascii")
+        remote = self._remote_path(path)
+        command = (
+            f"mkdir -p {shlex.quote(_dirname(remote))} && "
+            f"printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote)}"
+        )
+        result = self._run_unchecked(command)
+        if result["exit_code"] != 0:
+            raise RuntimeError(result["stderr"] or result["stdout"])
+        return f"Wrote {self._public_path(remote)}"
+
+    def mkdir(self, path: str, *, recursive: bool = True) -> str:
+        require_write(self.policy)
+        remote = self._remote_path(path)
+        command = f"mkdir {'-p ' if recursive else ''}{shlex.quote(remote)}"
+        result = self._run_unchecked(command)
+        if result["exit_code"] != 0:
+            raise RuntimeError(result["stderr"] or result["stdout"])
+        return f"Created {self._public_path(remote)}"
+
+    def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> str:
+        require_write(self.policy)
+        remote = self._remote_path(path)
+        flags = ""
+        if recursive:
+            flags += "r"
+        if force:
+            flags += "f"
+        flag_arg = f" -{flags}" if flags else ""
+        command = f"rm{flag_arg} {shlex.quote(remote)}"
+        result = self._run_unchecked(command)
+        if result["exit_code"] != 0:
+            raise RuntimeError(result["stderr"] or result["stdout"])
+        return f"Removed {self._public_path(remote)}"
 
     def edit_file(self, path: str, old: str, new: str, *, replace_all: bool = False) -> str:
         require_write(self.policy)

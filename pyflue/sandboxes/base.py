@@ -23,7 +23,9 @@ class SandboxFileInfo:
 
     path: str
     is_dir: bool = False
+    is_file: bool = False
     size: int = 0
+    mtime: float | None = None
 
 
 class SandboxBackend(Protocol):
@@ -39,11 +41,29 @@ class SandboxBackend(Protocol):
     def list_files(self, path: str = ".") -> list[SandboxFileInfo]:
         """List files at a path."""
 
+    def stat(self, path: str) -> SandboxFileInfo:
+        """Return normalized metadata for a file or directory."""
+
+    def exists(self, path: str) -> bool:
+        """Return whether a path exists inside the sandbox."""
+
     def read_file(self, path: str, *, offset: int = 1, limit: int | None = None) -> str:
         """Read a file."""
 
+    def read_bytes(self, path: str) -> bytes:
+        """Read a file as bytes."""
+
     def write_file(self, path: str, content: str) -> str:
         """Write a file."""
+
+    def write_bytes(self, path: str, content: bytes) -> str:
+        """Write bytes to a file."""
+
+    def mkdir(self, path: str, *, recursive: bool = True) -> str:
+        """Create a directory."""
+
+    def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> str:
+        """Remove a file or directory."""
 
     def edit_file(self, path: str, old: str, new: str, *, replace_all: bool = False) -> str:
         """Edit a file by replacing text."""

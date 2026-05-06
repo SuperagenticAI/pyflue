@@ -17,6 +17,7 @@ from pyflue.types import (
     PyFlueCommand,
     PyFlueConfig,
     PyFlueEvent,
+    define_command,
 )
 
 
@@ -96,6 +97,41 @@ async def test_session_skill_uses_markdown_skill(tmp_path):
 
     assert "Do triage" in agent.backend.calls[0]["prompt"]
     assert '"issue": 1' in agent.backend.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_session_discovers_context_from_sandbox(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(allow_write=True),
+    )
+    agent.backend = _FakeBackend(responses=["ok"])
+    session = await agent.session("s1")
+    await session.write_file("AGENTS.md", "Sandbox instructions")
+    await session.write_file(".agents/skills/review/SKILL.md", "Review from sandbox.")
+
+    await session.prompt("hello")
+
+    assert "Sandbox instructions" in agent.backend.calls[0]["system_prompt"]
+    assert "Directory structure:" in agent.backend.calls[0]["system_prompt"]
+    assert "review" in agent.backend.calls[0]["skills"]
+
+
+@pytest.mark.asyncio
+async def test_session_skill_loads_relative_sandbox_skill_path(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(allow_write=True),
+    )
+    agent.backend = _FakeBackend(responses=["ok"])
+    session = await agent.session("s1")
+    await session.write_file(".agents/skills/triage/reproduce.md", "Reproduce from sandbox.")
+
+    await session.skill("triage/reproduce.md")
+
+    assert "Reproduce from sandbox." in agent.backend.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -304,7 +340,8 @@ async def test_session_task_cwd_scopes_sandbox_and_context(tmp_path):
 
     await parent.task("child work", task_id="child", cwd="packages/api")
 
-    assert agent.backend.calls[0]["system_prompt"] == "API instructions"
+    assert agent.backend.calls[0]["system_prompt"].startswith("API instructions")
+    assert "Directory structure:" in agent.backend.calls[0]["system_prompt"]
     assert agent.backend.calls[0]["sandbox"].read_file("note.txt") == "scoped"
     with pytest.raises(FileNotFoundError):
         agent.backend.calls[0]["sandbox"].read_file("packages/api/note.txt")
@@ -364,6 +401,48 @@ async def test_sessions_delete_removes_child_task_tree(tmp_path):
         await agent.sessions.get("child")
     with pytest.raises(KeyError):
         await agent.sessions.get("grandchild")
+
+
+@pytest.mark.asyncio
+async def test_session_task_depth_limit(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents", max_task_depth=1)
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok"])
+    parent = await agent.session("parent")
+
+    await parent.task("child work", task_id="child")
+    child = await agent.sessions.get("child")
+
+    with pytest.raises(RuntimeError, match="Max task depth exceeded"):
+        await child.task("grandchild work", task_id="grandchild")
+
+
+@pytest.mark.asyncio
+async def test_session_abort_propagates_to_active_child_task(tmp_path):
+    events: list[PyFlueEvent] = []
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config, on_event=events.append)
+    agent.backend = _SlowBackend()
+    parent = await agent.session("parent")
+
+    running = asyncio.create_task(parent.task("child work", task_id="child"))
+    for _ in range(100):
+        if "child" in agent._active_tasks:
+            break
+        await asyncio.sleep(0.01)
+    assert "child" in agent._active_tasks
+
+    assert await parent.abort() is True
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    abort_requests = [
+        (event.data["session_id"], event.data.get("operation"))
+        for event in events
+        if event.type == "abort_requested"
+    ]
+    assert ("child", "prompt") in abort_requests
+    assert ("parent", "task") in abort_requests
 
 
 @pytest.mark.asyncio
@@ -667,6 +746,64 @@ async def test_structured_command_objects_are_prompt_tools(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_define_command_normalizes_callable_results(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+
+    def empty() -> None:
+        return None
+
+    def data() -> dict[str, str]:
+        return {"value": "ok"}
+
+    def failed() -> Exception:
+        return ValueError("bad value")
+
+    agent = PyFlueAgent(
+        config=config,
+        commands=[
+            define_command("empty", empty),
+            define_command("data", data),
+            define_command("failed", failed),
+        ],
+    )
+    agent.backend = _FakeBackend(responses=["ok"])
+    session = await agent.session("s1")
+
+    await session.prompt("hello")
+    tools = {tool.__name__: tool for tool in agent.backend.calls[0]["tools"]}
+
+    assert await tools["empty"]() == ""
+    assert await tools["data"]() == {"value": "ok"}
+    assert await tools["failed"]() == {"error": "bad value", "type": "ValueError"}
+
+
+@pytest.mark.asyncio
+async def test_define_command_accepts_mapping_and_shell_command(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    command = define_command(
+        "say_hi",
+        {
+            "description": "Say hi.",
+            "command": "printf hi",
+            "timeout": 10,
+        },
+    )
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(allow_shell=True),
+        commands=[command],
+    )
+    agent.backend = _FakeBackend(responses=["ok"])
+    session = await agent.session("s1")
+
+    await session.prompt("hello")
+    tools = {tool.__name__: tool for tool in agent.backend.calls[0]["tools"]}
+
+    assert (await tools["say_hi"]())["stdout"] == "hi"
+    assert tools["say_hi"].__doc__ == "Say hi."
+
+
+@pytest.mark.asyncio
 async def test_shell_command_object_runs_with_policy_grant(tmp_path):
     config = PyFlueConfig(root=tmp_path, harness="deepagents")
     command = PyFlueCommand(
@@ -700,7 +837,20 @@ async def test_session_prompt_passes_scoped_tools(tmp_path):
     await (await agent.session("s1")).prompt("hello", tools=[lookup])
 
     tool_names = [tool.__name__ for tool in agent.backend.calls[0]["tools"]]
-    assert tool_names == ["read", "write", "edit", "bash", "grep", "glob", "task", "lookup"]
+    assert tool_names == [
+        "read",
+        "write",
+        "edit",
+        "stat",
+        "exists",
+        "mkdir",
+        "rm",
+        "bash",
+        "grep",
+        "glob",
+        "task",
+        "lookup",
+    ]
 
 
 @pytest.mark.asyncio
@@ -725,10 +875,14 @@ async def test_agent_tools_are_available_for_prompt_skill_and_task(tmp_path):
     await session.task("child", task_id="child")
 
     for call in agent.backend.calls:
-        assert [tool.__name__ for tool in call["tools"]][:8] == [
+        assert [tool.__name__ for tool in call["tools"]][:12] == [
             "read",
             "write",
             "edit",
+            "stat",
+            "exists",
+            "mkdir",
+            "rm",
             "bash",
             "grep",
             "glob",
@@ -752,6 +906,13 @@ async def test_session_builtin_tools_operate_on_sandbox(tmp_path):
 
     assert await tools["write"]("notes/a.txt", "alpha\nbeta\n") == "Wrote notes/a.txt"
     assert await tools["read"]("notes/a.txt") == "alpha\nbeta"
+    stat = await tools["stat"]("notes/a.txt")
+    assert stat["path"] == "/notes/a.txt"
+    assert stat["is_file"] is True
+    assert stat["size"] == len("alpha\nbeta\n")
+    assert await tools["exists"]("notes/a.txt") is True
+    assert await tools["mkdir"]("notes/tmp") == "Created notes/tmp"
+    assert await tools["rm"]("notes/tmp", recursive=True) == "Removed notes/tmp"
     assert await tools["edit"]("notes/a.txt", "beta", "gamma") == "Edited notes/a.txt (1 replacement)"
     assert await tools["grep"]("gamma", path="notes") == "notes/a.txt:2:gamma"
     assert await tools["glob"]("notes/*.txt") == "notes/a.txt"
@@ -763,6 +924,28 @@ async def test_session_builtin_tools_operate_on_sandbox(tmp_path):
             env={"MODE": ":tool"},
         )
     )["stdout"].strip() == "alpha\ngamma:tool"
+
+
+@pytest.mark.asyncio
+async def test_session_builtin_tools_truncate_large_output(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(allow_write=True, allow_shell=True, allowed_commands=("python",)),
+    )
+    agent.backend = _FakeBackend(responses=["ok"])
+    session = await agent.session("s1")
+    await session.write_file("large.txt", "x" * 60000)
+
+    await session.prompt("hello")
+    tools = {tool.__name__: tool for tool in agent.backend.calls[0]["tools"]}
+
+    read_output = await tools["read"]("large.txt")
+    assert "Read output for large.txt truncated" in read_output
+
+    shell_output = await tools["bash"]("python -c 'print(\"x\" * 60000)'")
+    assert shell_output["truncated"] is True
+    assert "Command stdout truncated" in shell_output["stdout"]
 
 
 @pytest.mark.asyncio

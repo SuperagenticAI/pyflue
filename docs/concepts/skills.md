@@ -41,6 +41,12 @@ PyFlue scans:
 .agents/skills/**/*.md
 ```
 
+It also supports directory-style skills:
+
+```text
+.agents/skills/review/SKILL.md
+```
+
 If the directory does not exist, PyFlue loads zero skills. That is valid.
 
 ## Calling a Skill
@@ -58,6 +64,16 @@ When a skill is called, PyFlue builds a prompt from:
 - the Markdown instruction body
 - the `args` dictionary
 - the optional output schema from the skill
+
+You can also call a relative skill file under `.agents/skills`:
+
+```python
+result = await session.skill("triage/reproduce.md")
+```
+
+Before prompts and skill calls, PyFlue checks the active sandbox for
+`AGENTS.md`, `CLAUDE.md`, and `.agents/skills`. This lets child tasks and
+sandbox-prepared workspaces provide their own local instructions and skills.
 
 ## Name Resolution
 

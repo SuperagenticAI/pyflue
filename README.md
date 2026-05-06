@@ -118,7 +118,7 @@ async def main():
 | Python code backend | Use `pyflue[monty]` for safe host-side Python snippets. |
 | Remote sandboxes | Use Daytona, E2B, Modal, or Runloop with optional extras. |
 | Connector guides | Use `pyflue add` to print agent-readable setup guides for sandbox providers. |
-| Deployment | Generate Docker/FastAPI, CI, Railway, Render, Fly.io, Vercel, Netlify, and Cloudflare starter files. |
+| Deployment | Generate Docker/FastAPI, CI, Railway, Render, Fly.io, Vercel, Netlify, and Cloudflare Containers starter files. |
 
 ## Project Layout
 
@@ -213,6 +213,7 @@ pyflue build --target railway
 pyflue build --target fly
 pyflue build --target vercel
 pyflue build --target netlify
+pyflue build --target cloudflare
 ```
 
 Deploy with a supported provider CLI:

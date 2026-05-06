@@ -89,6 +89,7 @@ class PyFlueConfig:
     env: dict[str, str] = field(default_factory=dict)
     allowed_commands: tuple[str, ...] = ()
     allow_compound_commands: bool = False
+    max_task_depth: int = 8
     typed_retries: int = 3
     harness_config: dict[str, Any] = field(default_factory=dict)
     providers: ProvidersConfig = field(default_factory=ProvidersConfig)
@@ -133,6 +134,44 @@ class PyFlueCommand:
     cwd: str | None = None
     env: dict[str, str] | None = None
     timeout: int | None = 120
+
+
+def define_command(
+    name: str,
+    implementation: str | Callable[..., Any] | dict[str, Any] | None = None,
+    *,
+    description: str = "",
+    command: str | None = None,
+    callable: Callable[..., Any] | None = None,
+    schema: dict[str, Any] | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: int | None = 120,
+) -> PyFlueCommand:
+    """Create a reusable prompt command from a shell command or callable.
+
+    `implementation` may be a shell command string, a Python callable, or a
+    mapping with `command`, `callable`, `description`, `schema`, `cwd`, `env`,
+    and `timeout` keys.
+    """
+    values: dict[str, Any] = {}
+    if isinstance(implementation, dict):
+        values.update(implementation)
+    elif isinstance(implementation, str):
+        values["command"] = implementation
+    elif implementation is not None:
+        values["callable"] = implementation
+
+    return PyFlueCommand(
+        name=name,
+        description=str(values.get("description", description) or ""),
+        command=command if command is not None else values.get("command"),
+        callable=callable if callable is not None else values.get("callable"),
+        schema=schema if schema is not None else values.get("schema"),
+        cwd=cwd if cwd is not None else values.get("cwd"),
+        env=env if env is not None else values.get("env"),
+        timeout=timeout if timeout is not None else values.get("timeout", 120),
+    )
 
 
 @dataclass

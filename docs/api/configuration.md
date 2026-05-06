@@ -14,6 +14,7 @@ agents_dir = "agents"
 state_dir = ".pyflue/sessions"
 allowed_commands = ["git", "pytest"]
 allow_compound_commands = false
+max_task_depth = 8
 typed_retries = 3
 
 [sandbox]
@@ -57,6 +58,7 @@ X-Team = "agents"
 | `state_dir` | `.pyflue/sessions` | Session database directory. |
 | `allowed_commands` | `[]` | Optional shell command grant list. |
 | `allow_compound_commands` | `false` | Allow shell operators such as `&&`, pipes, and redirects. Keep disabled for untrusted workflows. |
+| `max_task_depth` | `8` | Maximum nested `session.task()` depth. Set to `0` to disable child tasks. |
 | `typed_retries` | `3` | Structured output repair attempts. |
 
 ## Secret Grants

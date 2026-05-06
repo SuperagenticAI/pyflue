@@ -89,7 +89,7 @@ PyFlue gives you the core pieces needed for agentic workflows:
 - secret grants for shell and prompt calls
 - command allowlists and compound-command protection
 - deployment files for Docker/FastAPI, GitHub Actions, GitLab CI, Railway,
-  Render, Fly.io, Vercel, Netlify, and Cloudflare starter projects
+  Render, Fly.io, Vercel, Netlify, and Cloudflare Containers starter projects
 
 ## Minimal Python Example
 

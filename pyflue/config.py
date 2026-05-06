@@ -33,6 +33,7 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
     state_dir = agent.get("state_dir")
     allowed_commands = agent.get("allowed_commands", ())
     allow_compound_commands = bool(agent.get("allow_compound_commands", False))
+    max_task_depth = int(agent.get("max_task_depth", 8) or 0)
     typed_retries = int(agent.get("typed_retries", 3) or 0)
     providers = _parse_providers(data.get("providers"))
     compaction = _parse_compaction(data.get("compaction"))
@@ -50,6 +51,7 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
         state_dir=(root / state_dir).resolve() if state_dir else None,
         allowed_commands=tuple(str(item) for item in allowed_commands),
         allow_compound_commands=allow_compound_commands,
+        max_task_depth=max_task_depth,
         typed_retries=typed_retries,
         harness_config={
             key: value

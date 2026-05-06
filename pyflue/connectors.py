@@ -213,8 +213,14 @@ provider: str
 policy: SandboxPolicy
 id: str
 list_files(path: str = ".") -> list[SandboxFileInfo]
+stat(path: str) -> SandboxFileInfo
+exists(path: str) -> bool
 read_file(path: str, *, offset: int = 1, limit: int | None = None) -> str
+read_bytes(path: str) -> bytes
 write_file(path: str, content: str) -> str
+write_bytes(path: str, content: bytes) -> str
+mkdir(path: str, *, recursive: bool = True) -> str
+rm(path: str, *, recursive: bool = False, force: bool = False) -> str
 edit_file(path: str, old: str, new: str, *, replace_all: bool = False) -> str
 grep(pattern: str, *, path: str = ".", include: str | None = None) -> str
 glob(pattern: str) -> str

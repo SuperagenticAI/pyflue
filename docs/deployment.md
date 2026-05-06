@@ -23,9 +23,9 @@ any platform that accepts a Python container.
 | Railway | Implemented | `pyflue build --target railway` | Generates Docker/FastAPI artifacts and `railway.json`. |
 | Render | Implemented | `pyflue build --target render` | Generates Docker/FastAPI artifacts and `render.yaml`. |
 | Fly.io | Implemented | `pyflue build --target fly` | Generates Docker/FastAPI artifacts and `fly.toml`. |
-| Cloudflare | Partial | `pyflue build --target cloudflare` | Generates `wrangler.toml`. Full Python container guidance is still needed. |
 | Vercel | Implemented | `pyflue build --target vercel` | Generates Python app artifacts and `vercel.json`. |
 | Netlify | Implemented | `pyflue build --target netlify` | Generates Python app artifacts and `netlify.toml`. |
+| Cloudflare Containers | Beta | `pyflue build --target cloudflare` | Generates Docker/FastAPI artifacts, `worker.ts`, `wrangler.jsonc`, and `package.json`. |
 
 ## Uvicorn/FastAPI
 
@@ -226,17 +226,34 @@ pyflue deploy --target fly
 
 When the Fly.io CLI is installed and authenticated, PyFlue runs `fly deploy`.
 
-## Cloudflare
+## Cloudflare Containers
 
-Generate the Cloudflare starter file:
+Generate Cloudflare Containers files:
 
 ```bash
 pyflue build --target cloudflare
 ```
 
-Cloudflare support is currently partial. The generated file is a starting point
-for Cloudflare Python or container deployments. For production today, prefer the
-Docker/FastAPI target on a container-capable platform.
+This target generates:
+
+```text
+Dockerfile
+app.py
+worker.ts
+wrangler.jsonc
+package.json
+```
+
+Cloudflare Containers are currently a beta Workers feature and require a
+Workers Paid plan. `wrangler deploy` builds and pushes the Docker image, so
+Docker must be running locally during deployment.
+
+Deploy with Wrangler:
+
+```bash
+npm install
+npm run deploy
+```
 
 ## Vercel
 

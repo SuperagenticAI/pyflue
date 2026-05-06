@@ -1,7 +1,6 @@
 # Example Agents
 
-PyFlue is inspired by the agent examples shown by the Flue framework. This page
-shows the same product-oriented agent categories in Python:
+This page shows product-oriented agent categories in Python:
 
 - issue triage
 - data analyst
@@ -14,11 +13,16 @@ The examples live under:
 examples/agents/
 ```
 
+A model-free server/client smoke demo lives under:
+
+```text
+examples/server_client/
+```
+
 ## Coding Agent
 
-This is the Python version of the "build your own coding agent" pattern. It
-creates an agent with shell access, prepares a repository workspace, and sends a
-coding prompt to the session.
+This example creates an agent with shell access, prepares a repository
+workspace, and sends a coding prompt to the session.
 
 ```python
 from pydantic import BaseModel
@@ -164,6 +168,12 @@ examples/agents/support_agent.py
 ```
 
 ## Running Examples
+
+Run the server/client smoke demo without a model key:
+
+```bash
+uv run python examples/server_client/run_smoke.py
+```
 
 Set a provider key for model-backed examples:
 

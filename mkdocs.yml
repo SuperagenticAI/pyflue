@@ -1,6 +1,6 @@
 site_name: PyFlue
 site_description: Python-first agent harness framework with Markdown skills, sessions, sandboxes, and pluggable backends.
-site_url: https://pyflue.dev
+site_url: https://superagenticai.github.io/pyflue/
 repo_name: pyflue
 repo_url: https://github.com/SuperagenticAI/pyflue
 edit_uri: ""
@@ -54,6 +54,7 @@ nav:
       - Skills: concepts/skills.md
       - Roles And Routing: concepts/roles-and-routing.md
       - Sessions: concepts/sessions.md
+      - MCP: concepts/mcp.md
       - Sandbox: concepts/sandbox.md
       - Python Backends: concepts/python-backends.md
       - Typed Outputs: concepts/typed-outputs.md

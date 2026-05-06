@@ -54,7 +54,14 @@ class SandboxBackend(Protocol):
     def glob(self, pattern: str) -> str:
         """Find files by glob pattern."""
 
-    def shell(self, command: str, *, timeout: int | None = 120) -> dict[str, Any]:
+    def shell(
+        self,
+        command: str,
+        *,
+        timeout: int | None = 120,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Run a shell command."""
 
 

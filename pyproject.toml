@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyflue"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python-first agent harness framework with Markdown skills, sessions, sandboxes, and pluggable backends."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,6 +49,8 @@ dependencies = [
   "aiosqlite>=0.21.0",
   "deepagents>=0.5.6,<0.6.0",
   "fastapi>=0.124.0,<1",
+  "httpx>=0.28.1,<1",
+  "mcp>=1.27.0",
   "pydantic>=2.12.2,<3",
   "python-frontmatter>=1.1.0",
   "pyyaml>=6.0.2,<7",
@@ -94,7 +96,7 @@ server = [
 pyflue = "pyflue.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/SuperagenticAI/pyflue"
+Homepage = "https://super-agentic.ai/pyflue"
 Documentation = "https://superagenticai.github.io/pyflue/"
 Repository = "https://github.com/SuperagenticAI/pyflue"
 Issues = "https://github.com/SuperagenticAI/pyflue/issues"

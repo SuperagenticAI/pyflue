@@ -19,6 +19,28 @@ typed_retries = 3
 [sandbox]
 workspace = "/workspace"
 options = {}
+
+[compaction]
+enabled = true
+context_window_tokens = 128000
+reserve_tokens = 16384
+keep_recent_tokens = 20000
+
+[mcp]
+mode = "direct"
+search_limit = 10
+search_backend = "bm25"
+
+[mcp.servers.docs]
+command = "python"
+args = ["mcp_server.py"]
+
+[providers.openai]
+base_url = "https://gateway.example.com/openai"
+api_key = "gateway-key"
+
+[providers.openai.headers]
+X-Team = "agents"
 ```
 
 ## Agent Settings
@@ -131,3 +153,99 @@ uv add "pyflue[monty]"
 DeepAgents is the default harness backend. OpenAI Agents SDK, Google ADK, and
 Pydantic AI are available as optional package extras for projects that want to
 build custom backends against the same PyFlue API.
+
+## Provider Settings
+
+Configure per-provider settings for API gateways, LiteLLM-style proxies, or enterprise endpoints:
+
+```python
+agent = await init(
+    providers={
+        "anthropic": {
+            "base_url": "https://api.anthropic.com",
+            "headers": {"X-Custom-Auth": "my-token"},
+            "api_key": "override-key"
+        },
+        "openai": {
+            "base_url": "https://litellm.example.com/openai"
+        }
+    }
+)
+```
+
+| Setting | Description |
+|---------|-------------|
+| `base_url` | Override the default API endpoint for the provider. Use for API gateways or LiteLLM proxies. |
+| `headers` | Additional headers sent with requests. Useful for authentication tokens or custom metadata. |
+| `api_key` | Override the API key for this provider. Useful when the gateway requires a specific key format. |
+
+Equivalent TOML:
+
+```toml
+[providers.anthropic]
+base_url = "https://api.anthropic.com"
+api_key = "override-key"
+
+[providers.anthropic.headers]
+X-Custom-Auth = "my-token"
+```
+
+## Compaction Settings
+
+Configure session history compaction to manage context tokens:
+
+```python
+agent = await init(
+    compaction_enabled=True,
+    compaction_context_window_tokens=128000,
+    compaction_reserve_tokens=16384,  # Keep 16K tokens free
+    compaction_keep_recent_tokens=20000  # Preserve last 20K tokens verbatim
+)
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `compaction_enabled` | `true` | Enable automatic compaction when session grows large. |
+| `compaction_context_window_tokens` | `128000` | Estimated model context window used for automatic compaction thresholds. |
+| `compaction_reserve_tokens` | `16384` | Number of tokens to keep free in context window. |
+| `compaction_keep_recent_tokens` | `20000` | Recent tokens to preserve verbatim (not summarize). |
+
+Equivalent TOML:
+
+```toml
+[compaction]
+enabled = true
+context_window_tokens = 128000
+reserve_tokens = 16384
+keep_recent_tokens = 20000
+```
+
+PyFlue uses token estimation (~4 characters per token) to summarize older conversation history while keeping recent messages intact. It compacts automatically before a turn when estimated history exceeds `context_window_tokens - reserve_tokens`, and `prompt()` retries once after context overflow errors by compacting with overflow recovery.
+
+## MCP Settings
+
+Configure MCP servers in `pyflue.toml` or through `init(...)`.
+
+```toml
+[mcp]
+mode = "search_execute"
+search_limit = 10
+search_backend = "bm25"
+
+[mcp.servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+[mcp.servers.remote]
+url = "https://example.com/mcp"
+transport = "streamable-http"
+
+[mcp.servers.remote.headers]
+Authorization = "Bearer token"
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `mode` | `direct` | Expose all MCP tools directly, or use `search_execute` to expose only search and execute tools. |
+| `search_limit` | `10` | Number of tools returned by `mcp_search`. |
+| `search_backend` | `bm25` | Search implementation. Use `semantic` when sentence-transformer dependencies are installed. |

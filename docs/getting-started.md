@@ -44,6 +44,13 @@ pyflue init my-agent
 cd my-agent
 ```
 
+To verify the server and client path without a model key, run the bundled smoke
+demo from the PyFlue repository root:
+
+```bash
+uv run python examples/server_client/run_smoke.py
+```
+
 The command creates:
 
 ```text

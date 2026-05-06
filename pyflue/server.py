@@ -6,30 +6,56 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from pyflue.config import load_config
 from pyflue.routing import discover_agent_routes, invoke_route
 
 
+class WebhookRequest(BaseModel):
+    """Request model for webhook endpoints."""
+
+    payload: dict[str, Any] = {}
+
+
 def create_app(config_path: str | Path = "pyflue.toml") -> Any:
-    """Create a FastAPI app with Flue-style agent webhook routes."""
+    """Create a FastAPI app with agent webhook routes."""
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import HTMLResponse, StreamingResponse
-        from pydantic import BaseModel
     except Exception as exc:
         raise ImportError(
             "PyFlue server support requires FastAPI. Install with: pip install 'pyflue[server]'"
         ) from exc
 
-    class WebhookRequest(BaseModel):
-        payload: dict[str, Any] = {}
-
     config = load_config(config_path)
     app = FastAPI(title="PyFlue Agent Server")
+    app.state.pyflue_agent = None
+
+    async def get_agent() -> Any:
+        from pyflue import init
+
+        if app.state.pyflue_agent is None:
+            app.state.pyflue_agent = await init(config_path=config_path)
+        return app.state.pyflue_agent
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "framework": "pyflue"}
+
+    @app.get("/__pyflue/status")
+    async def status() -> dict[str, Any]:
+        routes = discover_agent_routes(config.root, config.agents_dir)
+        agent = app.state.pyflue_agent
+        active = dict(getattr(agent, "_active_operations", {}) if agent is not None else {})
+        return {
+            "ok": True,
+            "root": str(config.root),
+            "harness": config.harness,
+            "sandbox": config.sandbox,
+            "agents": sorted(routes),
+            "active_sessions": active,
+        }
 
     @app.get("/agents")
     async def list_agents() -> dict[str, Any]:
@@ -81,25 +107,28 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
 
     @app.post("/prompt/{agent_id}")
     async def prompt(agent_id: str, request: WebhookRequest) -> dict[str, Any]:
-        from pyflue import init
-
         prompt_text = str(request.payload.get("prompt", ""))
-        agent = await init(config_path=config_path)
+        agent = await get_agent()
         session = await agent.session(agent_id)
         result = await session.prompt(prompt_text)
         return {"text": result.text, "metadata": result.metadata}
 
     @app.post("/prompt/{agent_id}/events")
     async def prompt_events(agent_id: str, request: WebhookRequest) -> Any:
-        from pyflue import init
-
         async def events() -> Any:
             prompt_text = str(request.payload.get("prompt", ""))
-            agent = await init(config_path=config_path)
+            agent = await get_agent()
             session = await agent.session(agent_id)
             async for event in session.stream(prompt_text):
                 yield f"event: {event.type}\ndata: {json.dumps(event.data)}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream")
+
+    @app.post("/sessions/{session_id}/abort")
+    async def abort_session(session_id: str) -> dict[str, Any]:
+        agent = await get_agent()
+        session = await agent.session(session_id)
+        aborted = await session.abort()
+        return {"aborted": aborted, "session_id": session_id}
 
     return app

@@ -4160,12 +4160,14 @@ wheels = [
 
 [[package]]
 name = "pyflue"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "deepagents" },
     { name = "fastapi" },
+    { name = "httpx" },
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
@@ -4237,6 +4239,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.124.0,<1" },
     { name = "google-adk", marker = "extra == 'google'", specifier = ">=1.32.0,<1.33.0" },
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.72,<2" },
+    { name = "httpx", specifier = ">=0.28.1,<1" },
+    { name = "mcp", specifier = ">=1.27.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.1,<2" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6.0,<10" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.3.0" },

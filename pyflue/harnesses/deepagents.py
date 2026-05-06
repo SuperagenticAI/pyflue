@@ -102,6 +102,9 @@ class DeepAgentsBackend(HarnessBackend):
         chunks: list[str] = []
         raw_end: Any = None
         async for event in agent.astream_events(inputs, config=run_config, version="v2"):
+            tool_event = _extract_tool_event(event)
+            if tool_event is not None:
+                yield tool_event
             delta = _extract_stream_delta(event)
             if delta:
                 chunks.append(delta)
@@ -300,7 +303,7 @@ def _create_agent_call(
     memory = _memory_sources(config)
     permissions = None if backend is not None else _permissions(sandbox)
     agent = create_deep_agent(
-        model=config.model,
+        model=_resolve_model(config),
         tools=_tools(python_backend, tools),
         system_prompt=system_prompt or None,
         backend=backend,
@@ -321,6 +324,29 @@ def _create_agent_call(
         "tool_count": len(tools or ()),
     }
     return agent, inputs, run_config, metadata
+
+
+def _resolve_model(config: PyFlueConfig) -> Any:
+    model = config.model
+    if not model:
+        return model
+    provider_name = model.split(":", 1)[0] if ":" in model else model.split("/", 1)[0]
+    settings = config.providers.get(provider_name)
+    if settings is None:
+        return model
+    try:
+        from langchain.chat_models import init_chat_model
+    except Exception:
+        return model
+
+    kwargs: dict[str, Any] = {}
+    if settings.base_url:
+        kwargs["base_url"] = settings.base_url
+    if settings.api_key:
+        kwargs["api_key"] = settings.api_key
+    if settings.headers:
+        kwargs["default_headers"] = settings.headers
+    return init_chat_model(model, **kwargs)
 
 
 def _skill_sources(config: PyFlueConfig) -> list[str]:
@@ -406,6 +432,37 @@ def _extract_stream_delta(event: dict[str, Any]) -> str:
         return "".join(parts)
     text = getattr(chunk, "text", None)
     return text if isinstance(text, str) else ""
+
+
+def _extract_tool_event(event: dict[str, Any]) -> PyFlueEvent | None:
+    event_name = str(event.get("event") or "")
+    if event_name not in {"on_tool_start", "on_tool_end"}:
+        return None
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    tool_name = str(event.get("name") or data.get("name") or "tool")
+    tool_call_id = str(event.get("run_id") or data.get("tool_call_id") or "")
+    if event_name == "on_tool_start":
+        return PyFlueEvent(
+            "tool_start",
+            {
+                "toolName": tool_name,
+                "toolCallId": tool_call_id,
+                "args": data.get("input"),
+                "raw": event,
+            },
+        )
+    output = data.get("output")
+    is_error = bool(data.get("error")) or isinstance(output, Exception)
+    return PyFlueEvent(
+        "tool_end",
+        {
+            "toolName": tool_name,
+            "toolCallId": tool_call_id,
+            "isError": is_error,
+            "result": str(output) if isinstance(output, Exception) else output,
+            "raw": event,
+        },
+    )
 
 
 def _from_backend_path(path: str | None) -> str:

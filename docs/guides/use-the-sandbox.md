@@ -46,7 +46,26 @@ For production use, prefer command allowlists:
 ```python
 agent = await init(
     allow_shell=True,
-    allowed_commands=["python", "pytest"],
+    allowed_commands=["python"],
+    commands=["pytest"],
+)
+```
+
+`allowed_commands` sets the base sandbox policy. `commands` grants commands to
+every PyFlue call made through that agent. Per-call `commands` grants are
+available for one operation:
+
+```python
+await session.shell("ruff check .", commands=["ruff"])
+```
+
+Run a command from a subdirectory or add environment variables for one call:
+
+```python
+await session.shell(
+    "pytest -q",
+    cwd="packages/api",
+    env={"PYTHONWARNINGS": "error"},
 )
 ```
 

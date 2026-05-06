@@ -108,15 +108,42 @@ class ShellSandboxMixin:
             raise RuntimeError(result["stderr"] or result["stdout"])
         return "\n".join(self._public_path(line) for line in result["stdout"].splitlines())
 
-    def shell(self, command: str, *, timeout: int | None = 120) -> dict[str, Any]:
+    def shell(
+        self,
+        command: str,
+        *,
+        timeout: int | None = 120,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         require_shell(self.policy, command)
-        return self._run_provider(command, timeout=timeout)
+        return self._run_provider(self._shell_command(command, cwd=cwd, env=env), timeout=timeout)
 
     def _run_unchecked(self, command: str, *, timeout: int | None = 120) -> dict[str, Any]:
         return self._run_provider(command, timeout=timeout)
 
     def _run_provider(self, command: str, *, timeout: int | None = 120) -> dict[str, Any]:
         raise NotImplementedError
+
+    def _shell_command(
+        self,
+        command: str,
+        *,
+        cwd: str | None,
+        env: dict[str, str] | None,
+    ) -> str:
+        parts = []
+        if cwd:
+            parts.append(f"cd {shlex.quote(self._remote_path(cwd))}")
+        if env:
+            exports = " ".join(
+                f"{shlex.quote(str(key))}={shlex.quote(str(value))}"
+                for key, value in env.items()
+            )
+            parts.append(f"env {exports} {command}")
+        else:
+            parts.append(command)
+        return " && ".join(parts)
 
     def _remote_path(self, path: str) -> str:
         raw = str(path or ".")

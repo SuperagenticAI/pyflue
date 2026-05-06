@@ -4,9 +4,7 @@
     PyFlue is a Python-first agent harness framework for building autonomous
     agents with Markdown skills, persistent sessions, sandboxed filesystem
     access, shell execution, typed Pydantic outputs, and pluggable harness
-    backends. It is inspired by the
-    <a href="https://flueframework.com">Flue framework</a> and adapts the
-    agent harness pattern for Python teams.
+    backends. It adapts the agent harness pattern for Python teams.
   </p>
 </section>
 
@@ -35,10 +33,9 @@ PyFlue gives Python developers a framework-shaped agent runtime instead of a
 collection of low-level primitives. The default backend is DeepAgents, with a
 stable PyFlue API layered above it.
 
-PyFlue is inspired by Flue's agent harness model: Markdown skills, stateful
-sessions, sandboxed tools, typed outputs, and deployable agent entrypoints.
-PyFlue adapts those ideas for Python teams with Pydantic, Python packaging,
-and Python-friendly deployment targets.
+PyFlue provides Markdown skills, stateful sessions, sandboxed tools, typed
+outputs, and deployable agent entrypoints for Python teams with Pydantic,
+Python packaging, and Python-friendly deployment targets.
 
 The public model is simple:
 
@@ -81,6 +78,9 @@ PyFlue gives you the core pieces needed for agentic workflows:
 - stateful sessions backed by SQLite
 - a virtual sandbox with read, write, edit, grep, glob, and shell tools
 - Pydantic validation for typed results
+- cancellation for active prompt, stream, task, and shell operations
+- structured command tools with `PyFlueCommand`
+- a Python client for deployed PyFlue servers
 - a DeepAgents runtime backend
 - a backend registry for future OpenAI Agents, Google ADK, Pydantic AI, and
   custom harness backends

@@ -30,9 +30,17 @@ class HarnessBackend(ABC):
     ) -> HarnessResult:
         """Run one prompt turn."""
 
-    async def shell(self, command: str, *, sandbox: Any, timeout: int | None = None) -> dict[str, Any]:
+    async def shell(
+        self,
+        command: str,
+        *,
+        sandbox: Any,
+        timeout: int | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Run a shell command through the configured sandbox."""
-        return sandbox.shell(command, timeout=timeout)
+        return sandbox.shell(command, timeout=timeout, cwd=cwd, env=env)
 
     async def stream(
         self,

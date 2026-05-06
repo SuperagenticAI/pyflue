@@ -11,15 +11,92 @@ any platform that accepts a Python container.
 
 | Target | Status | Command | Notes |
 | --- | --- | --- | --- |
-| Docker/FastAPI | Implemented | `pyflue build --target docker` | General Python web target. Use this for local servers, VPS, Kubernetes, and container platforms. |
+| **New Build System** |
+| Uvicorn | Implemented | `pyflue build --target uvicorn` | FastAPI server with SSE/webhook support. |
+| Lambda | Implemented | `pyflue build --target lambda` | AWS Lambda with Mangum adapter. |
+| Cloud Run | Implemented | `pyflue build --target cloudrun` | Google Cloud Run with gunicorn. |
+| Docker | Implemented | `pyflue build --target docker` | General Python container. |
+| **CI/CD** |
 | GitHub Actions | Implemented | `pyflue build --target github-actions` | Generates `.github/workflows/pyflue-agent.yml`. |
 | GitLab CI/CD | Implemented | `pyflue build --target gitlab-ci` | Generates `.gitlab-ci.yml`. |
+| **Platforms** |
 | Railway | Implemented | `pyflue build --target railway` | Generates Docker/FastAPI artifacts and `railway.json`. |
 | Render | Implemented | `pyflue build --target render` | Generates Docker/FastAPI artifacts and `render.yaml`. |
 | Fly.io | Implemented | `pyflue build --target fly` | Generates Docker/FastAPI artifacts and `fly.toml`. |
 | Cloudflare | Partial | `pyflue build --target cloudflare` | Generates `wrangler.toml`. Full Python container guidance is still needed. |
 | Vercel | Implemented | `pyflue build --target vercel` | Generates Python app artifacts and `vercel.json`. |
 | Netlify | Implemented | `pyflue build --target netlify` | Generates Python app artifacts and `netlify.toml`. |
+
+## Uvicorn/FastAPI
+
+Generate a FastAPI server with built-in development support:
+
+```bash
+pyflue build --target uvicorn
+```
+
+This writes:
+
+```text
+dist/server.py
+dist/requirements.txt
+dist/manifest.json
+```
+
+Run the server:
+
+```bash
+cd dist
+pip install -r requirements.txt
+python server.py
+```
+
+The server exposes:
+- `GET /health` - Health check
+- `GET /agents` - List available agents
+- `POST /agents/{name}/{agent_id}` - Run an agent
+
+## AWS Lambda
+
+Generate an AWS Lambda handler with Mangum adapter:
+
+```bash
+pyflue build --target lambda
+```
+
+This writes:
+
+```text
+dist/main.py
+dist/requirements.txt
+dist/manifest.json
+```
+
+Deploy to Lambda using the AWS CLI or SAM. The handler is `handler`.
+
+## Google Cloud Run
+
+Generate a Cloud Run optimized container:
+
+```bash
+pyflue build --target cloudrun
+```
+
+This writes:
+
+```text
+dist/server.py
+dist/Dockerfile
+dist/requirements.txt
+dist/cloudbuild.yaml
+dist/manifest.json
+```
+
+Deploy using:
+
+```bash
+gcloud run deploy --source .
+```
 
 ## Docker/FastAPI
 
@@ -32,11 +109,13 @@ pyflue build --target docker
 This writes:
 
 ```text
-Dockerfile
-app.py
+dist/Dockerfile
+dist/server.py
+dist/requirements.txt
+dist/manifest.json
 ```
 
-The generated `app.py` exposes the PyFlue server:
+The generated server exposes the PyFlue server:
 
 ```bash
 curl http://localhost:8000/prompt/default \

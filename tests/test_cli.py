@@ -95,3 +95,22 @@ def test_cli_add_lists_and_prints_connector_guides():
     assert result.exit_code == 0
     assert "Build a PyFlue Sandbox Connector" in result.output
     assert "https://e2b.dev/docs" in result.output
+
+
+def test_cli_routes_lists_agent_routes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    (agents / "default.py").write_text(
+        "triggers = {'webhook': True}\n"
+        "async def default(context):\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["routes"])
+
+    assert result.exit_code == 0
+    assert '"name": "default"' in result.output
+    assert '"/agents/default/{agent_id}"' in result.output

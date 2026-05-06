@@ -6,7 +6,13 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pyflue.types import PyFlueConfig
+from pyflue.types import (
+    CompactionConfig,
+    McpConfig,
+    ProvidersConfig,
+    ProviderSettings,
+    PyFlueConfig,
+)
 
 
 def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
@@ -28,6 +34,9 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
     allowed_commands = agent.get("allowed_commands", ())
     allow_compound_commands = bool(agent.get("allow_compound_commands", False))
     typed_retries = int(agent.get("typed_retries", 3) or 0)
+    providers = _parse_providers(data.get("providers"))
+    compaction = _parse_compaction(data.get("compaction"))
+    mcp = _parse_mcp(data.get("mcp"))
 
     return PyFlueConfig(
         model=agent.get("model"),
@@ -45,6 +54,53 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
         harness_config={
             key: value
             for key, value in data.items()
-            if key not in {"agent", "deployment"}
+            if key not in {"agent", "deployment", "providers", "compaction", "mcp"}
         },
+        providers=providers,
+        compaction=compaction,
+        mcp=mcp,
+    )
+
+
+def _parse_providers(value: Any) -> ProvidersConfig:
+    config = ProvidersConfig()
+    if not isinstance(value, dict):
+        return config
+    for name, raw in value.items():
+        if not isinstance(raw, dict):
+            continue
+        headers = raw.get("headers")
+        config.set(
+            str(name),
+            ProviderSettings(
+                base_url=str(raw["base_url"]) if raw.get("base_url") else None,
+                headers={str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None,
+                api_key=str(raw["api_key"]) if raw.get("api_key") else None,
+            ),
+        )
+    return config
+
+
+def _parse_compaction(value: Any) -> CompactionConfig:
+    if not isinstance(value, dict):
+        return CompactionConfig()
+    return CompactionConfig(
+        enabled=bool(value.get("enabled", True)),
+        context_window_tokens=int(value.get("context_window_tokens", 128000) or 0),
+        reserve_tokens=int(value.get("reserve_tokens", 16384) or 0),
+        keep_recent_tokens=int(value.get("keep_recent_tokens", 20000) or 0),
+    )
+
+
+def _parse_mcp(value: Any) -> McpConfig | None:
+    if not isinstance(value, dict):
+        return None
+    servers = value.get("servers", {})
+    return McpConfig(
+        servers={str(k): dict(v) for k, v in servers.items() if isinstance(v, dict)}
+        if isinstance(servers, dict)
+        else {},
+        mode=value.get("mode", "direct"),
+        search_limit=int(value.get("search_limit", 10) or 0),
+        search_backend=value.get("search_backend", "bm25"),
     )

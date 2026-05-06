@@ -22,6 +22,8 @@ Each session stores:
 - user messages
 - assistant messages
 - tool messages
+- structured history entries
+- compaction entries and active context summaries
 
 ## Prompt History
 
@@ -35,17 +37,68 @@ await session.prompt("Now suggest the smallest fix")
 The second prompt includes the recent conversation so the harness can continue
 from the same context.
 
+## Automatic Compaction
+
+PyFlue compacts long sessions automatically when the estimated history size
+exceeds the configured context threshold:
+
+```text
+context_window_tokens - reserve_tokens
+```
+
+Older messages are summarized into a `[Context Summary]` entry while recent
+messages are kept verbatim. `session.compact()` is still available for explicit
+compaction, and `prompt()` performs one overflow recovery retry if the backend
+raises a context-length error.
+
+```python
+agent = await init(
+    compaction_context_window_tokens=128000,
+    compaction_reserve_tokens=16384,
+    compaction_keep_recent_tokens=20000,
+)
+```
+
+Compaction emits `compaction_start` and `compaction_end` through `on_event`.
+
 ## Session Methods
 
 | Method | Status | Purpose |
 | --- | --- | --- |
 | `prompt(text, result=None, role=None, model=None)` | Implemented | Run a direct prompt. |
 | `skill(name, args=None, result=None, role=None, model=None)` | Implemented | Run a Markdown skill. |
-| `task(prompt, result=None, role=None, model=None)` | Implemented | Run an isolated child task using the same sandbox. |
-| `subagent(prompt, result=None)` | Implemented | Alias-style helper for child sessions. |
-| `shell(command, timeout=120)` | Implemented | Run shell through sandbox policy. |
+| `task(prompt, result=None, role=None, model=None, cwd=None)` | Implemented | Run an isolated child task using the same sandbox. |
+| `subagent(prompt, result=None, cwd=None)` | Implemented | Alias-style helper for child sessions. |
+| `shell(command, timeout=120, cwd=None, env=None)` | Implemented | Run shell through sandbox policy. |
 | `read_file(path)` | Implemented | Read a sandbox file. |
 | `write_file(path, content)` | Implemented | Write a sandbox file when enabled. |
+
+## Built-In Prompt Tools
+
+Every prompt receives built-in tools backed by the session sandbox:
+
+| Tool | Purpose |
+| --- | --- |
+| `read` | Read a file or list a directory. |
+| `write` | Write a file when write policy allows it. |
+| `edit` | Replace exact text in a file. |
+| `bash` | Run a shell command when shell policy allows it. Supports `cwd` and `env`. |
+| `grep` | Search files by regular expression. |
+| `glob` | Find files by glob pattern. |
+| `task` | Delegate focused work to a child session, optionally with `cwd`. |
+
+Custom per-call tools cannot reuse these names.
+
+Agent-wide tools can be supplied when the agent is initialized:
+
+```python
+async def lookup_issue(number: int) -> str:
+    return f"Issue #{number}"
+
+agent = await init(tools=[lookup_issue])
+```
+
+Per-call tools are still supported and are added after agent-wide tools.
 
 ## Tasks
 
@@ -55,8 +108,17 @@ Tasks give you a child history while keeping the same sandbox:
 result = await session.task(
     "Inspect only the failing tests",
     role="coder",
+    cwd="packages/api",
 )
 ```
 
 This is useful when the parent agent needs focused work without mixing every
 intermediate step into the parent conversation.
+
+When `cwd` is set, the child sees file paths relative to that directory. With
+the virtual sandbox, PyFlue also loads `AGENTS.md`, skills, and roles from the
+scoped directory, so package-specific instructions can guide the child task.
+
+Task sessions store parent and child metadata. Calling
+`agent.sessions.delete(...)` on a parent session removes the recorded child task
+tree as well as the parent session state.

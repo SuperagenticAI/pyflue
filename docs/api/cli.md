@@ -63,6 +63,20 @@ Create a new Markdown skill:
 pyflue skill new review
 ```
 
+## `pyflue routes`
+
+List discovered agent routes:
+
+```bash
+pyflue routes
+```
+
+Use a specific config file:
+
+```bash
+pyflue routes --config pyflue.toml
+```
+
 ## `pyflue add`
 
 Print connector setup instructions for a coding agent.
@@ -110,7 +124,10 @@ Available targets:
 
 | Target | Status | Generated files |
 | --- | --- | --- |
-| `docker` | Implemented | `Dockerfile`, `app.py` |
+| `uvicorn` | Implemented | `dist/server.py`, `dist/requirements.txt`, `dist/manifest.json` |
+| `lambda` | Implemented | `dist/main.py`, `dist/requirements.txt`, `dist/manifest.json` |
+| `cloudrun` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/cloudbuild.yaml`, `dist/requirements.txt`, `dist/manifest.json` |
+| `docker` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/manifest.json` |
 | `github-actions` | Implemented | `.github/workflows/pyflue-agent.yml` |
 | `gitlab-ci` | Implemented | `.gitlab-ci.yml` |
 | `railway` | Implemented | `Dockerfile`, `app.py`, `railway.json` |
@@ -119,6 +136,10 @@ Available targets:
 | `vercel` | Implemented | `Dockerfile`, `app.py`, `vercel.json` |
 | `netlify` | Implemented | `Dockerfile`, `app.py`, `netlify.toml` |
 | `cloudflare` | Partial | `wrangler.toml` |
+
+The `uvicorn`, `lambda`, `cloudrun`, and `docker` targets use the workspace
+build system. It discovers agent files recursively under `agents/` or
+`.agents/`, writes a manifest, and generates a Python server entrypoint.
 
 ## `pyflue dev`
 
@@ -133,9 +154,12 @@ The server exposes:
 ```text
 GET  /health
 GET  /agents
+GET  /__pyflue
+GET  /__pyflue/status
 POST /agents/{name}/{agent_id}
 POST /prompt/{agent_id}
 POST /prompt/{agent_id}/events
+POST /sessions/{session_id}/abort
 ```
 
 ## `pyflue deploy`

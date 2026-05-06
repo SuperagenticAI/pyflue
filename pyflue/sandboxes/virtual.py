@@ -99,17 +99,27 @@ class VirtualSandbox:
         paths = sorted(globlib.glob(search, recursive=True))
         return "\n".join(self.relative(Path(path)) for path in paths)
 
-    def shell(self, command: str, *, timeout: int | None = 120) -> dict[str, Any]:
+    def shell(
+        self,
+        command: str,
+        *,
+        timeout: int | None = 120,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         require_shell(self.policy, command)
+        workdir = self.resolve(cwd or ".")
+        if not workdir.is_dir():
+            raise NotADirectoryError(cwd or ".")
         completed = subprocess.run(
             command,
-            cwd=self.root,
+            cwd=workdir,
             shell=True,
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
-            env={**os.environ, **self.env},
+            env={**os.environ, **self.env, **(env or {})},
         )
         return {
             "stdout": completed.stdout,

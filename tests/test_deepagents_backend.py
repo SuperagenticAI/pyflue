@@ -6,6 +6,7 @@ from types import ModuleType
 from pyflue.harnesses.deepagents import (
     _create_agent_call,
     _DeepAgentsSandboxBackend,
+    _extract_tool_event,
     _permissions,
 )
 from pyflue.sandbox import SandboxPolicy, VirtualSandbox
@@ -118,6 +119,37 @@ def test_deepagents_permissions_mirror_sandbox_policy(monkeypatch, tmp_path):
         "operations": ["read", "write"],
         "paths": ["/**"],
     }
+
+
+def test_deepagents_tool_events_are_normalized():
+    start = _extract_tool_event(
+        {
+            "event": "on_tool_start",
+            "name": "read",
+            "run_id": "run-1",
+            "data": {"input": {"path": "README.md"}},
+        }
+    )
+    end = _extract_tool_event(
+        {
+            "event": "on_tool_end",
+            "name": "read",
+            "run_id": "run-1",
+            "data": {"output": "content"},
+        }
+    )
+
+    assert start is not None
+    assert start.type == "tool_start"
+    assert start.data["toolName"] == "read"
+    assert start.data["toolCallId"] == "run-1"
+    assert start.data["args"] == {"path": "README.md"}
+    assert end is not None
+    assert end.type == "tool_end"
+    assert end.data["toolName"] == "read"
+    assert end.data["toolCallId"] == "run-1"
+    assert end.data["isError"] is False
+    assert end.data["result"] == "content"
 
 
 def _install_fake_deepagents_protocol(monkeypatch):

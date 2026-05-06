@@ -11,6 +11,8 @@ import typer
 from rich.console import Console
 
 from pyflue import init
+from pyflue._builder import build as build_agent
+from pyflue._builder import resolve_workspace_from_cwd
 from pyflue.connectors import (
     render_add_prompt,
     render_connector_listing,
@@ -28,10 +30,15 @@ CONFIG_OPTION = typer.Option("pyflue.toml", "--config")
 ALLOW_WRITE_OPTION = typer.Option(False, "--allow-write")
 ALLOW_SHELL_OPTION = typer.Option(False, "--allow-shell")
 PORT_OPTION = typer.Option(2024, "--port")
+WORKSPACE_OPTION = typer.Option(None, "--workspace", "-w")
+OUTPUT_OPTION = typer.Option(None, "--output", "-o")
 PROJECT_NAME_ARGUMENT = typer.Argument("pyflue-agent")
 SKILL_NAME_ARGUMENT = typer.Argument(...)
 BuildTarget = Literal[
+    "uvicorn",
+    "lambda",
     "docker",
+    "cloudrun",
     "github-actions",
     "gitlab-ci",
     "railway",
@@ -132,6 +139,8 @@ def dev(port: int = PORT_OPTION, config: Path = CONFIG_OPTION) -> None:
             "pyflue dev requires server dependencies. Install with: pip install 'pyflue[server]'"
         ) from exc
     console.print(f"Starting PyFlue dev server on http://127.0.0.1:{port}")
+    console.print(f"Dashboard: http://127.0.0.1:{port}/__pyflue")
+    console.print(f"Status: http://127.0.0.1:{port}/__pyflue/status")
     uvicorn.run(
         "pyflue.server:create_app",
         factory=True,
@@ -143,10 +152,55 @@ def dev(port: int = PORT_OPTION, config: Path = CONFIG_OPTION) -> None:
 
 
 @app.command()
-def build(target: BuildTarget = "docker") -> None:
+def routes(config: Path = CONFIG_OPTION) -> None:
+    """List discovered agent routes for the current workspace."""
+    from pyflue.config import load_config
+    from pyflue.routing import discover_agent_routes
+
+    loaded = load_config(config)
+    discovered = discover_agent_routes(loaded.root, loaded.agents_dir)
+    rows = [
+        {"name": route.name, "path": route.url_path, "triggers": route.triggers}
+        for route in discovered.values()
+    ]
+    console.print_json(data={"agents": rows})
+
+
+@app.command()
+def build(
+    target: BuildTarget = "docker",
+    workspace: Path | None = WORKSPACE_OPTION,
+    output: Path | None = OUTPUT_OPTION,
+) -> None:
     """Generate deployment artifacts."""
-    paths = write_deploy_artifacts(target)
-    console.print("Generated " + ", ".join(str(path) for path in paths))
+    new_targets = {"uvicorn", "lambda", "docker", "cloudrun"}
+
+    if target in new_targets:
+        workspace_dir = workspace or resolve_workspace_from_cwd()
+        if not workspace_dir:
+            if target == "docker":
+                paths = write_deploy_artifacts(target)
+                console.print("Generated " + ", ".join(str(path) for path in paths))
+                return
+            raise typer.BadParameter(
+                "No PyFlue workspace found. Run pyflue init first or use --workspace."
+            )
+        output_dir = output or workspace_dir
+
+        try:
+            from pyflue._builder import BuildOptions
+            result = build_agent(BuildOptions(
+                workspace_dir=str(workspace_dir),
+                output_dir=str(output_dir),
+                target=target,
+            ))
+            console.print(f"Generated {len(result.generated_files)} file(s) in {result.output_dir}")
+        except Exception as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    else:
+        paths = write_deploy_artifacts(target)
+        console.print("Generated " + ", ".join(str(path) for path in paths))
 
 
 @app.command()

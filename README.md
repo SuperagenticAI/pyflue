@@ -1,7 +1,8 @@
 # PyFlue
 
 [![CI](https://github.com/SuperagenticAI/pyflue/actions/workflows/ci.yml/badge.svg)](https://github.com/SuperagenticAI/pyflue/actions/workflows/ci.yml)
-[![Docs](https://github.com/SuperagenticAI/pyflue/actions/workflows/docs.yml/badge.svg)](https://pyflue.ai)
+[![Docs](https://img.shields.io/badge/docs-superagenticai.github.io%2Fpyflue-blue)](https://superagenticai.github.io/pyflue/)
+[![Landing Page](https://img.shields.io/badge/landing-super--agentic.ai%2Fpyflue-black)](https://super-agentic.ai/pyflue)
 [![PyPI](https://img.shields.io/pypi/v/pyflue)](https://pypi.org/project/pyflue/)
 [![Python](https://img.shields.io/pypi/pyversions/pyflue)](https://pypi.org/project/pyflue/)
 [![License](https://img.shields.io/pypi/l/pyflue)](https://github.com/SuperagenticAI/pyflue/blob/main/LICENSE)
@@ -12,8 +13,7 @@ stateful sessions, sandboxed filesystem and shell access, typed Pydantic
 outputs, streaming events, file-based webhook routes, and deployment-ready
 project structure.
 
-PyFlue is inspired by the [Flue framework](https://flueframework.com) and
-adapts the agent harness model for Python teams.
+PyFlue adapts the agent harness model for Python teams.
 
 > **Warning: Active Development**
 >
@@ -23,6 +23,10 @@ adapts the agent harness model for Python teams.
 Use it to build coding agents, issue triage agents, data analysis agents,
 support agents, and workflow agents that need controlled access to files,
 commands, tools, and structured outputs.
+
+Documentation: <https://superagenticai.github.io/pyflue/>
+
+Landing page: <https://super-agentic.ai/pyflue>
 
 ## Install
 
@@ -56,6 +60,12 @@ pip install "pyflue[sandboxes]"
 pyflue init my-agent
 cd my-agent
 pyflue run --prompt "Review this project"
+```
+
+Run a local server/client smoke demo without a model key:
+
+```bash
+uv run python examples/server_client/run_smoke.py
 ```
 
 ## Python API
@@ -99,8 +109,11 @@ async def main():
 | Tasks | Run focused child tasks with isolated history and shared sandbox. |
 | Sandbox | Read, write, edit, grep, glob, and shell behind explicit policies. |
 | Secret grants | Keep secrets out of prompts and grant them only per call. |
-| Typed outputs | Validate results with Pydantic and repair invalid JSON automatically. |
+| Typed outputs | Validate results with Pydantic, extract JSON from text, and repair invalid JSON automatically. |
 | Streaming | Use `session.stream(...)`, `pyflue run --stream`, or SSE. |
+| Abort | Cancel active prompt, stream, task, and shell operations with `session.abort()`. |
+| Structured commands | Expose reusable shell or callable commands with `PyFlueCommand`. |
+| Python client | Call deployed PyFlue servers with `PyFlueClient`. |
 | Webhooks | Expose `agents/*.py` as `/agents/{name}/{agent_id}`. |
 | Python code backend | Use `pyflue[monty]` for safe host-side Python snippets. |
 | Remote sandboxes | Use Daytona, E2B, Modal, or Runloop with optional extras. |

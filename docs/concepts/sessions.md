@@ -78,9 +78,9 @@ Compaction emits `compaction_start` and `compaction_end` through `on_event`.
 
 | Method | Status | Purpose |
 | --- | --- | --- |
-| `prompt(text, result=None, role=None, model=None)` | Implemented | Run a direct prompt. |
-| `skill(name, args=None, result=None, role=None, model=None)` | Implemented | Run a Markdown skill. |
-| `task(prompt, result=None, role=None, model=None, cwd=None)` | Implemented | Run an isolated child task using the same sandbox. |
+| `prompt(text, result=None, role=None, model=None, thinking_level=None, images=None)` | Implemented | Run a direct prompt. |
+| `skill(name, args=None, result=None, role=None, model=None, thinking_level=None, images=None)` | Implemented | Run a Markdown skill. |
+| `task(prompt, result=None, role=None, model=None, thinking_level=None, images=None, cwd=None)` | Implemented | Run an isolated child task using the same sandbox. |
 | `subagent(prompt, result=None, cwd=None)` | Implemented | Alias-style helper for child sessions. |
 | `shell(command, timeout=120, cwd=None, env=None)` | Implemented | Run shell through sandbox policy. |
 | `read_file(path)` | Implemented | Read a sandbox file. |

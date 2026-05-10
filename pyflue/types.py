@@ -5,9 +5,73 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 SandboxName = Literal["virtual", "local", "daytona", "e2b", "modal", "runloop"]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh"]
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class PromptImage:
+    """Inline image content attached to a prompt, skill, or task call."""
+
+    data: str | bytes
+    mime_type: str = "image/png"
+
+
+@dataclass(frozen=True)
+class PromptCost:
+    """Cost buckets for one prompt-like call."""
+
+    input: float = 0.0
+    output: float = 0.0
+    cache_read: float = 0.0
+    cache_write: float = 0.0
+    total: float = 0.0
+
+
+@dataclass(frozen=True)
+class PromptUsage:
+    """Token and cost usage for one prompt-like call."""
+
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+    total_tokens: int = 0
+    cost: PromptCost = field(default_factory=PromptCost)
+
+
+@dataclass(frozen=True)
+class PromptModel:
+    """Model selected for a prompt-like call."""
+
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class PromptResultResponse(Generic[T]):
+    """Typed prompt result plus the original text, usage, and selected model.
+
+    Attribute access falls back to the parsed result value so existing code
+    using `response.field` for Pydantic models keeps working.
+    """
+
+    result: T
+    text: str
+    usage: PromptUsage = field(default_factory=PromptUsage)
+    model: PromptModel = field(default_factory=PromptModel)
+    raw: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def value(self) -> T:
+        """Alias for `result` for Python callers who prefer value semantics."""
+        return self.result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.result, name)
 
 
 @dataclass(frozen=True)
@@ -30,6 +94,7 @@ class Role:
     instructions: str
     description: str = ""
     model: str | None = None
+    thinking_level: ThinkingLevel | None = None
     path: Path | None = None
 
 
@@ -43,6 +108,7 @@ class ProviderSettings:
     base_url: str | None = None
     headers: dict[str, str] | None = None
     api_key: str | None = None
+    store_responses: bool = False
 
 
 @dataclass
@@ -78,6 +144,7 @@ class PyFlueConfig:
     """Runtime configuration for one PyFlue agent."""
 
     model: str | None = None
+    thinking_level: ThinkingLevel | None = None
     harness: str = "deepagents"
     sandbox: str = "virtual"
     python_backend: str | None = None
@@ -104,6 +171,8 @@ class HarnessResult:
     text: str
     raw: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    usage: PromptUsage = field(default_factory=PromptUsage)
+    model: PromptModel = field(default_factory=PromptModel)
 
 
 @dataclass(frozen=True)

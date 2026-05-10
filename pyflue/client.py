@@ -10,7 +10,14 @@ import httpx
 from pydantic import TypeAdapter
 
 from pyflue.core import _parse_typed_result
-from pyflue.types import HarnessResult, PyFlueEvent
+from pyflue.types import (
+    HarnessResult,
+    PromptCost,
+    PromptModel,
+    PromptResultResponse,
+    PromptUsage,
+    PyFlueEvent,
+)
 
 
 class PyFlueClient:
@@ -67,10 +74,20 @@ class PyFlueClient:
             text=str(data.get("text", "")),
             metadata=dict(data.get("metadata") or {}),
             raw=data,
+            usage=_prompt_usage_from_dict(data.get("usage")),
+            model=PromptModel(**data["model"]) if isinstance(data.get("model"), dict) else PromptModel(),
         )
         if result is None:
             return output
-        return _parse_typed_result(output.text, result)
+        parsed = _parse_typed_result(output.text, result)
+        return PromptResultResponse(
+            result=parsed,
+            text=output.text,
+            usage=output.usage,
+            model=output.model,
+            raw=output.raw,
+            metadata=output.metadata,
+        )
 
     async def agent(
         self,
@@ -113,3 +130,23 @@ class PyFlueClient:
                 elif line.startswith("data:"):
                     data = json.loads(line.removeprefix("data:").strip())
                     yield PyFlueEvent(event_type, data)
+
+
+def _prompt_usage_from_dict(value: Any) -> PromptUsage:
+    if not isinstance(value, dict):
+        return PromptUsage()
+    cost = value.get("cost")
+    return PromptUsage(
+        input=int(value.get("input") or 0),
+        output=int(value.get("output") or 0),
+        cache_read=int(value.get("cache_read") or 0),
+        cache_write=int(value.get("cache_write") or 0),
+        total_tokens=int(value.get("total_tokens") or 0),
+        cost=PromptCost(
+            input=float(cost.get("input") or 0) if isinstance(cost, dict) else 0.0,
+            output=float(cost.get("output") or 0) if isinstance(cost, dict) else 0.0,
+            cache_read=float(cost.get("cache_read") or 0) if isinstance(cost, dict) else 0.0,
+            cache_write=float(cost.get("cache_write") or 0) if isinstance(cost, dict) else 0.0,
+            total=float(cost.get("total") or 0) if isinstance(cost, dict) else 0.0,
+        ),
+    )

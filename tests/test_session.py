@@ -14,6 +14,8 @@ from pyflue.sandbox import SandboxPolicy
 from pyflue.types import (
     CompactionConfig,
     HarnessResult,
+    PromptModel,
+    PromptUsage,
     PyFlueCommand,
     PyFlueConfig,
     PyFlueEvent,
@@ -41,6 +43,8 @@ class _FakeBackend(HarnessBackend):
             text=text,
             raw=SimpleNamespace(),
             metadata={"harness": "fake"},
+            usage=PromptUsage(input=1, output=2, total_tokens=3),
+            model=PromptModel(id=kwargs.get("config").model),
         )
 
 
@@ -78,7 +82,25 @@ async def test_session_prompt_persists_and_parses_result(tmp_path):
     result = await session.prompt("hello", result=_Result)
 
     assert result.summary == "ok"
+    assert result.result.summary == "ok"
+    assert result.usage.total_tokens == 3
+    assert result.model.id is None
     assert agent.backend.calls[0]["system_prompt"] == "System"
+
+
+@pytest.mark.asyncio
+async def test_session_prompt_returns_usage_and_model_metadata(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents", model="fake-model")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    result = await (await agent.session("s1")).prompt("hello")
+
+    assert result.text == "ok"
+    assert result.usage.input == 1
+    assert result.usage.output == 2
+    assert result.usage.total_tokens == 3
+    assert result.model.id == "fake-model"
 
 
 @pytest.mark.asyncio
@@ -193,6 +215,39 @@ async def test_session_role_model_precedence(tmp_path):
 
     assert agent.backend.calls[0]["config"].model == "role-model"
     assert agent.backend.calls[1]["config"].model == "call-model"
+
+
+@pytest.mark.asyncio
+async def test_session_thinking_level_precedence(tmp_path):
+    role_dir = tmp_path / ".agents" / "roles"
+    role_dir.mkdir(parents=True)
+    (role_dir / "coder.md").write_text(
+        "---\nname: coder\nthinking_level: high\n---\nThink carefully.",
+        encoding="utf-8",
+    )
+    config = PyFlueConfig(root=tmp_path, harness="deepagents", thinking_level="low")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok", "ok", "ok"])
+
+    session = await agent.session("s1")
+    await session.prompt("hello")
+    await session.prompt("hello", role="coder")
+    await session.prompt("hello", role="coder", thinking_level="off")
+
+    assert agent.backend.calls[0]["config"].thinking_level == "low"
+    assert agent.backend.calls[1]["config"].thinking_level == "high"
+    assert agent.backend.calls[2]["config"].thinking_level == "off"
+
+
+@pytest.mark.asyncio
+async def test_session_prompt_passes_images_to_backend(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    await (await agent.session("s1")).prompt("describe", images=[{"type": "image_url", "image_url": {"url": "x"}}])
+
+    assert agent.backend.calls[0]["images"] == [{"type": "image_url", "image_url": {"url": "x"}}]
 
 
 @pytest.mark.asyncio
@@ -677,6 +732,27 @@ async def test_session_shell_supports_cwd_and_env(tmp_path):
     )
 
     assert result["stdout"].strip() == "from cwd:test"
+
+
+@pytest.mark.asyncio
+async def test_session_shell_persists_tool_transcript(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(
+        config=config,
+        sandbox_policy=SandboxPolicy(allow_shell=True, allowed_commands=("printf",)),
+    )
+    session = await agent.session("s1")
+
+    await session.shell("printf hi")
+    messages = await session._all_messages()
+
+    assert messages[0] == ("user", "Run this shell command:\n\n```bash\nprintf hi\n```")
+    assert messages[1][0] == "assistant"
+    assert json.loads(messages[1][1])["name"] == "bash"
+    assert messages[2][0] == "toolResult"
+    tool_result = json.loads(messages[2][1])
+    assert tool_result["toolName"] == "bash"
+    assert tool_result["content"]["stdout"] == "hi"
 
 
 @pytest.mark.asyncio

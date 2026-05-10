@@ -26,6 +26,7 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
     agent = data.get("agent", {}) if isinstance(data.get("agent"), dict) else {}
     harness = str(agent.get("harness", "deepagents") or "deepagents")
     sandbox = str(agent.get("sandbox", "virtual") or "virtual")
+    thinking_level = agent.get("thinking_level")
     python_backend = agent.get("python_backend")
     skills_dir = agent.get("skills_dir")
     roles_dir = agent.get("roles_dir")
@@ -41,6 +42,7 @@ def load_config(path: str | Path = "pyflue.toml") -> PyFlueConfig:
 
     return PyFlueConfig(
         model=agent.get("model"),
+        thinking_level=str(thinking_level) if thinking_level else None,
         harness=harness,
         sandbox=sandbox,
         python_backend=str(python_backend) if python_backend else None,
@@ -78,6 +80,7 @@ def _parse_providers(value: Any) -> ProvidersConfig:
                 base_url=str(raw["base_url"]) if raw.get("base_url") else None,
                 headers={str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None,
                 api_key=str(raw["api_key"]) if raw.get("api_key") else None,
+                store_responses=bool(raw.get("store_responses", False)),
             ),
         )
     return config

@@ -36,6 +36,7 @@ from pyflue.skills import (
 )
 from pyflue.types import (
     HarnessResult,
+    PromptResultResponse,
     PyFlueCommand,
     PyFlueConfig,
     PyFlueEvent,
@@ -91,6 +92,7 @@ def _mcp_tool_to_callable(tool: Any) -> Any:
 async def init(
     *,
     model: str | None = None,
+    thinking_level: str | None = None,
     harness: str | None = None,
     sandbox: str | None = None,
     python_backend: str | None = None,
@@ -119,6 +121,8 @@ async def init(
     config = load_config(config_path or "pyflue.toml")
     if model is not None:
         config.model = model
+    if thinking_level is not None:
+        config.thinking_level = thinking_level
     if harness is not None:
         config.harness = harness
     if sandbox is not None:
@@ -145,6 +149,7 @@ async def init(
                 base_url=settings.get("base_url"),
                 headers=settings.get("headers"),
                 api_key=settings.get("api_key"),
+                store_responses=bool(settings.get("store_responses", False)),
             ))
 
     if (
@@ -508,8 +513,10 @@ class PyFlueSession:
         result: type[BaseModel] | Any | None = None,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
         retries: int | None = None,
         stream: bool = False,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -532,6 +539,8 @@ class PyFlueSession:
                             history,
                             model=model,
                             role=role,
+                            thinking_level=thinking_level,
+                            images=images,
                             tools=tools,
                             stream=stream,
                         )
@@ -549,6 +558,8 @@ class PyFlueSession:
                         original_prompt=history,
                         model=model,
                         role=role,
+                        thinking_level=thinking_level,
+                        images=images,
                         tools=tools,
                         retries=self.agent.config.typed_retries if retries is None else retries,
                         stream=stream,
@@ -571,6 +582,8 @@ class PyFlueSession:
         *,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -592,6 +605,8 @@ class PyFlueSession:
                     history,
                     model=model,
                     role=role,
+                    thinking_level=thinking_level,
+                    images=images,
                     tools=tools,
                 ):
                     if event.type == "delta":
@@ -639,8 +654,10 @@ class PyFlueSession:
         result: type[BaseModel] | Any | None = None,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
         retries: int | None = None,
         stream: bool = False,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -660,8 +677,10 @@ class PyFlueSession:
             result=result,
             role=role,
             model=model,
+            thinking_level=thinking_level,
             retries=retries,
             stream=stream,
+            images=images,
             secrets=secrets,
             commands=commands,
             tools=tools,
@@ -675,6 +694,8 @@ class PyFlueSession:
         result: type[BaseModel] | Any | None = None,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -686,6 +707,8 @@ class PyFlueSession:
             result=result,
             role=role,
             model=model,
+            thinking_level=thinking_level,
+            images=images,
             secrets=secrets,
             commands=commands,
             tools=tools,
@@ -700,7 +723,9 @@ class PyFlueSession:
         result: type[BaseModel] | Any | None = None,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
         task_id: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -723,6 +748,8 @@ class PyFlueSession:
                 result=result,
                 role=role,
                 model=model,
+                thinking_level=thinking_level,
+                images=images,
                 task_id=child_id,
                 secrets=secrets,
                 commands=commands,
@@ -750,7 +777,9 @@ class PyFlueSession:
         result: type[BaseModel] | Any | None = None,
         role: str | None = None,
         model: str | None = None,
+        thinking_level: str | None = None,
         task_id: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         secrets: list[str] | tuple[str, ...] | None = None,
         commands: list[str] | tuple[str, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
@@ -783,6 +812,8 @@ class PyFlueSession:
                 result=result,
                 role=role,
                 model=model,
+                thinking_level=thinking_level,
+                images=images,
                 secrets=secrets,
                 commands=commands,
                 tools=tools,
@@ -884,6 +915,7 @@ class PyFlueSession:
         """Run a shell command through the configured sandbox."""
         self._begin_operation("shell")
         command_name, args = _shell_command_parts(command)
+        tool_call_id = uuid.uuid4().hex
         try:
             await self._emit_event("command_start", command=command_name, args=args)
             with self._grant_secrets(secrets), self._scope_commands(commands):
@@ -894,7 +926,14 @@ class PyFlueSession:
                     cwd=cwd,
                     env=env,
                 )
-            await self._append("tool", json.dumps(output, sort_keys=True), source="shell")
+            await self._append_shell_transcript(
+                tool_call_id=tool_call_id,
+                command=command,
+                cwd=cwd,
+                env=env,
+                output=output,
+                is_error=False,
+            )
             await self._emit_event(
                 "command_end",
                 command=command_name,
@@ -905,6 +944,14 @@ class PyFlueSession:
             await self._emit_event("aborted", operation="shell")
             raise
         except Exception as exc:
+            await self._append_shell_transcript(
+                tool_call_id=tool_call_id,
+                command=command,
+                cwd=cwd,
+                env=env,
+                output={"stdout": "", "stderr": str(exc), "exit_code": -1},
+                is_error=True,
+            )
             await self._emit_event("error", error=str(exc))
             raise
         finally:
@@ -1211,6 +1258,41 @@ class PyFlueSession:
             await self._save_history(db, history)
             await db.commit()
 
+    async def _append_shell_transcript(
+        self,
+        *,
+        tool_call_id: str,
+        command: str,
+        cwd: str | None,
+        env: dict[str, str] | None,
+        output: dict[str, Any],
+        is_error: bool,
+    ) -> None:
+        args: dict[str, Any] = {"command": command}
+        if cwd is not None:
+            args["cwd"] = cwd
+        if env is not None:
+            args["env"] = env
+        assistant = {
+            "type": "toolCall",
+            "id": tool_call_id,
+            "name": "bash",
+            "arguments": args,
+        }
+        tool_result = {
+            "toolCallId": tool_call_id,
+            "toolName": "bash",
+            "isError": is_error,
+            "content": output,
+        }
+        await self._append(
+            "user",
+            f"Run this shell command:\n\n```bash\n{command}\n```",
+            source="shell",
+        )
+        await self._append("assistant", json.dumps(assistant, sort_keys=True), source="shell")
+        await self._append("toolResult", json.dumps(tool_result, sort_keys=True), source="shell")
+
     async def _messages(self) -> list[tuple[str, str]]:
         rows = await self._all_messages()
         return rows[-12:]
@@ -1363,12 +1445,19 @@ class PyFlueSession:
         *,
         model: str | None,
         role: str | None = None,
+        thinking_level: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
         stream: bool,
     ) -> HarnessResult:
         config = self.agent.config
         effective_role = self._effective_role(role)
         resolved_model = model or (effective_role.model if effective_role else None)
+        resolved_thinking_level = (
+            thinking_level
+            or (effective_role.thinking_level if effective_role else None)
+            or config.thinking_level
+        )
         if self.context_root != config.root:
             config = PyFlueConfig(
                 **{
@@ -1380,6 +1469,8 @@ class PyFlueSession:
             )
         if resolved_model is not None:
             config = PyFlueConfig(**{**config.__dict__, "model": resolved_model})
+        if resolved_thinking_level is not None:
+            config = PyFlueConfig(**{**config.__dict__, "thinking_level": resolved_thinking_level})
         merged_tools = await self._merge_tools(tools)
         return await self.agent.backend.run(
             prompt=prompt,
@@ -1390,6 +1481,7 @@ class PyFlueSession:
             session_id=self.session_id,
             python_backend=self.python_backend,
             tools=merged_tools,
+            images=images,
             stream=stream,
         )
 
@@ -1399,11 +1491,18 @@ class PyFlueSession:
         *,
         model: str | None,
         role: str | None = None,
+        thinking_level: str | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> AsyncIterator[PyFlueEvent]:
         config = self.agent.config
         effective_role = self._effective_role(role)
         resolved_model = model or (effective_role.model if effective_role else None)
+        resolved_thinking_level = (
+            thinking_level
+            or (effective_role.thinking_level if effective_role else None)
+            or config.thinking_level
+        )
         if self.context_root != config.root:
             config = PyFlueConfig(
                 **{
@@ -1415,6 +1514,8 @@ class PyFlueSession:
             )
         if resolved_model is not None:
             config = PyFlueConfig(**{**config.__dict__, "model": resolved_model})
+        if resolved_thinking_level is not None:
+            config = PyFlueConfig(**{**config.__dict__, "thinking_level": resolved_thinking_level})
         merged_tools = await self._merge_tools(tools)
         async for event in self.agent.backend.stream(
             prompt=prompt,
@@ -1425,6 +1526,7 @@ class PyFlueSession:
             session_id=self.session_id,
             python_backend=self.python_backend,
             tools=merged_tools,
+            images=images,
         ):
             yield event
 
@@ -1640,6 +1742,8 @@ class PyFlueSession:
         original_prompt: str,
         model: str | None,
         role: str | None,
+        thinking_level: str | None,
+        images: list[Any] | tuple[Any, ...] | None,
         tools: list[Any] | tuple[Any, ...] | None,
         retries: int,
         stream: bool,
@@ -1648,7 +1752,15 @@ class PyFlueSession:
         current = output
         for attempt in range(max(retries, 0) + 1):
             try:
-                return _parse_typed_result(current.text, result)
+                parsed = _parse_typed_result(current.text, result)
+                return PromptResultResponse(
+                    result=parsed,
+                    text=current.text,
+                    usage=current.usage,
+                    model=current.model,
+                    raw=current.raw,
+                    metadata=dict(current.metadata),
+                )
             except Exception as exc:
                 last_error = exc
                 if attempt >= retries:
@@ -1671,6 +1783,8 @@ class PyFlueSession:
                     repair_prompt,
                     model=model,
                     role=role,
+                    thinking_level=thinking_level,
+                    images=images,
                     tools=tools,
                     stream=stream,
                 )

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4
+
+- Added stable prompt response usage and selected-model metadata.
+- Added typed prompt response wrappers with `.result`, `.usage`, `.model`, `.text`, `.metadata`, and backward-compatible attribute forwarding.
+- Added `thinking_level` support on config, roles, and prompt/skill/task calls.
+- Added image inputs for prompt, skill, and task calls on supported harnesses.
+- Added `store_responses` provider setting for OpenAI Responses-compatible deployments.
+- Improved `session.shell()` history to persist shell calls as user, assistant tool-call, and tool-result transcript entries.
+- Exported MCP connection helpers from the top-level `pyflue` package.
+- Added parity notes against the TypeScript Flue reference.
+
 ## 0.1.3
 
 - Added DeepAgents backend support for sandbox-backed filesystem tools, task delegation, streaming tool events, provider settings, and scoped working directories.

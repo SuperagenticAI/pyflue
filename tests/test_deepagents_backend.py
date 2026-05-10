@@ -8,9 +8,10 @@ from pyflue.harnesses.deepagents import (
     _DeepAgentsSandboxBackend,
     _extract_tool_event,
     _permissions,
+    _resolve_model,
 )
 from pyflue.sandbox import SandboxPolicy, VirtualSandbox
-from pyflue.types import PyFlueConfig
+from pyflue.types import ProviderSettings, PyFlueConfig
 
 
 def test_deepagents_backend_upload_download_and_execute(monkeypatch, tmp_path):
@@ -119,6 +120,25 @@ def test_deepagents_permissions_mirror_sandbox_policy(monkeypatch, tmp_path):
         "operations": ["read", "write"],
         "paths": ["/**"],
     }
+
+
+def test_deepagents_resolve_model_applies_store_responses(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_init_chat_model(model, **kwargs):
+        captured["model"] = model
+        captured["kwargs"] = kwargs
+        return "model"
+
+    fake_langchain = ModuleType("langchain.chat_models")
+    fake_langchain.init_chat_model = fake_init_chat_model
+    monkeypatch.setitem(sys.modules, "langchain.chat_models", fake_langchain)
+
+    config = PyFlueConfig(root=tmp_path, model="openai:gpt-4o")
+    config.providers.set("openai", ProviderSettings(store_responses=True))
+
+    assert _resolve_model(config) == "model"
+    assert captured["kwargs"]["store"] is True
 
 
 def test_deepagents_tool_events_are_normalized():

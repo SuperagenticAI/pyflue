@@ -24,6 +24,7 @@ class OpenAIAgentsBackend(HarnessBackend):
         session_id: str,
         python_backend: Any | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         stream: bool = False,
     ) -> HarnessResult:
         raise NotImplementedError(

@@ -7,6 +7,13 @@ import pytest
 from pyflue.mcp import McpStdioServerOptions, connect_mcp_server_stdio
 
 
+def test_public_api_exports_mcp_connectors():
+    import pyflue
+
+    assert pyflue.connect_mcp_server_stdio is connect_mcp_server_stdio
+    assert callable(pyflue.connect_mcp_server)
+
+
 @pytest.mark.asyncio
 async def test_stdio_mcp_connection_stays_open_for_tool_calls(monkeypatch):
     state = {"transport_closed": False, "session_closed": False}

@@ -169,7 +169,8 @@ agent = await init(
             "api_key": "override-key"
         },
         "openai": {
-            "base_url": "https://litellm.example.com/openai"
+            "base_url": "https://litellm.example.com/openai",
+            "store_responses": True,
         }
     }
 )
@@ -180,6 +181,7 @@ agent = await init(
 | `base_url` | Override the default API endpoint for the provider. Use for API gateways or LiteLLM proxies. |
 | `headers` | Additional headers sent with requests. Useful for authentication tokens or custom metadata. |
 | `api_key` | Override the API key for this provider. Useful when the gateway requires a specific key format. |
+| `store_responses` | Request server-side response storage for OpenAI Responses-compatible providers when supported. |
 
 Equivalent TOML:
 

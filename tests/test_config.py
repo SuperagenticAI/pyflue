@@ -9,11 +9,13 @@ def test_load_config_parses_providers_compaction_and_mcp(tmp_path):
         """
 [agent]
 model = "openai:gpt-4o"
+thinking_level = "high"
 max_task_depth = 4
 
 [providers.openai]
 base_url = "https://gateway.example/v1"
 api_key = "test-key"
+store_responses = true
 
 [providers.openai.headers]
 X-Team = "agents"
@@ -43,7 +45,9 @@ args = ["server.py"]
     assert provider is not None
     assert provider.base_url == "https://gateway.example/v1"
     assert provider.api_key == "test-key"
+    assert provider.store_responses is True
     assert provider.headers == {"X-Team": "agents"}
+    assert config.thinking_level == "high"
     assert config.compaction.enabled is False
     assert config.compaction.context_window_tokens == 1000
     assert config.compaction.reserve_tokens == 100

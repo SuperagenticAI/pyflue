@@ -8,7 +8,15 @@ from typing import Any
 
 from pyflue.harnesses.base import HarnessBackend
 from pyflue.sandboxes.base import SandboxBackend
-from pyflue.types import HarnessResult, PyFlueConfig, PyFlueEvent, Skill
+from pyflue.types import (
+    HarnessResult,
+    PromptCost,
+    PromptModel,
+    PromptUsage,
+    PyFlueConfig,
+    PyFlueEvent,
+    Skill,
+)
 
 try:
     from deepagents.backends.protocol import (
@@ -34,6 +42,7 @@ class DeepAgentsBackend(HarnessBackend):
         session_id: str,
         python_backend: Any | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         stream: bool = False,
     ) -> HarnessResult:
         agent, inputs, run_config, metadata = _create_agent_call(
@@ -45,6 +54,7 @@ class DeepAgentsBackend(HarnessBackend):
             session_id=session_id,
             python_backend=python_backend,
             tools=tools,
+            images=images,
             harness_name=self.name,
             stream=stream,
         )
@@ -56,6 +66,8 @@ class DeepAgentsBackend(HarnessBackend):
             text=_extract_text(raw),
             raw=raw,
             metadata=metadata,
+            usage=_extract_usage(raw),
+            model=_extract_model(raw, config.model),
         )
 
     async def stream(
@@ -69,6 +81,7 @@ class DeepAgentsBackend(HarnessBackend):
         session_id: str,
         python_backend: Any | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
     ) -> AsyncIterator[PyFlueEvent]:
         agent, inputs, run_config, metadata = _create_agent_call(
             prompt=prompt,
@@ -79,6 +92,7 @@ class DeepAgentsBackend(HarnessBackend):
             session_id=session_id,
             python_backend=python_backend,
             tools=tools,
+            images=images,
             harness_name=self.name,
             stream=True,
         )
@@ -92,6 +106,7 @@ class DeepAgentsBackend(HarnessBackend):
                 session_id=session_id,
                 python_backend=python_backend,
                 tools=tools,
+                images=images,
                 stream=True,
             )
             if result.text:
@@ -287,6 +302,7 @@ def _create_agent_call(
     session_id: str,
     python_backend: Any | None,
     tools: list[Any] | tuple[Any, ...] | None,
+    images: list[Any] | tuple[Any, ...] | None = None,
     harness_name: str,
     stream: bool,
 ) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -313,15 +329,18 @@ def _create_agent_call(
         checkpointer=None,
         name="pyflue",
     )
-    inputs = {"messages": [{"role": "user", "content": prompt}]}
+    inputs = {"messages": [{"role": "user", "content": _message_content(prompt, images)}]}
     run_config = {"configurable": {"thread_id": session_id}}
     metadata = {
         "harness": harness_name,
+        "model": config.model,
+        "thinking_level": config.thinking_level,
         "skill_count": len(skills),
         "skill_sources": skill_sources,
         "memory": memory,
         "stream": stream,
         "tool_count": len(tools or ()),
+        "image_count": len(images or ()),
     }
     return agent, inputs, run_config, metadata
 
@@ -346,6 +365,8 @@ def _resolve_model(config: PyFlueConfig) -> Any:
         kwargs["api_key"] = settings.api_key
     if settings.headers:
         kwargs["default_headers"] = settings.headers
+    if settings.store_responses and provider_name in {"openai", "azure", "azure-openai"}:
+        kwargs["store"] = True
     return init_chat_model(model, **kwargs)
 
 
@@ -400,6 +421,33 @@ def _tools(
     return tools
 
 
+def _message_content(prompt: str, images: list[Any] | tuple[Any, ...] | None) -> Any:
+    if not images:
+        return prompt
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for image in images:
+        content.append(_image_content_part(image))
+    return content
+
+
+def _image_content_part(image: Any) -> dict[str, Any]:
+    if isinstance(image, dict):
+        return dict(image)
+    data = getattr(image, "data", image)
+    mime_type = str(getattr(image, "mime_type", "image/png") or "image/png")
+    if isinstance(data, bytes):
+        import base64
+
+        data = base64.b64encode(data).decode("ascii")
+    data_text = str(data)
+    if data_text.startswith(("http://", "https://", "data:")):
+        return {"type": "image_url", "image_url": {"url": data_text}}
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime_type};base64,{data_text}"},
+    }
+
+
 def _extract_text(raw: Any) -> str:
     if isinstance(raw, str):
         return raw
@@ -412,6 +460,88 @@ def _extract_text(raw: Any) -> str:
         if hasattr(raw, attr):
             return str(getattr(raw, attr)).strip()
     return str(raw).strip()
+
+
+def _extract_usage(raw: Any) -> PromptUsage:
+    usage = _find_usage(raw)
+    if usage is None:
+        return PromptUsage()
+    input_tokens = _int_attr(usage, "input", "input_tokens", "prompt_tokens")
+    output_tokens = _int_attr(usage, "output", "output_tokens", "completion_tokens")
+    cache_read = _int_attr(usage, "cache_read", "cacheRead", "cache_read_input_tokens")
+    cache_write = _int_attr(usage, "cache_write", "cacheWrite", "cache_creation_input_tokens")
+    total_tokens = _int_attr(usage, "total_tokens", "totalTokens", "total")
+    if total_tokens == 0:
+        total_tokens = input_tokens + output_tokens + cache_read + cache_write
+    raw_cost = _get_value(usage, "cost")
+    cost = PromptCost()
+    if raw_cost is not None:
+        cost = PromptCost(
+            input=float(_get_value(raw_cost, "input") or 0),
+            output=float(_get_value(raw_cost, "output") or 0),
+            cache_read=float(_get_value(raw_cost, "cache_read") or _get_value(raw_cost, "cacheRead") or 0),
+            cache_write=float(_get_value(raw_cost, "cache_write") or _get_value(raw_cost, "cacheWrite") or 0),
+            total=float(_get_value(raw_cost, "total") or 0),
+        )
+    return PromptUsage(
+        input=input_tokens,
+        output=output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+        total_tokens=total_tokens,
+        cost=cost,
+    )
+
+
+def _extract_model(raw: Any, fallback: str | None) -> PromptModel:
+    model = _find_model(raw) or fallback
+    return PromptModel(id=str(model) if model else None)
+
+
+def _find_usage(value: Any) -> Any | None:
+    direct = _get_value(value, "usage")
+    if direct is not None:
+        return direct
+    if isinstance(value, dict):
+        messages = value.get("messages")
+        if isinstance(messages, list):
+            for message in reversed(messages):
+                found = _find_usage(message)
+                if found is not None:
+                    return found
+    return None
+
+
+def _find_model(value: Any) -> Any | None:
+    for name in ("model", "model_id", "modelId"):
+        candidate = _get_value(value, name)
+        if candidate:
+            return candidate
+    if isinstance(value, dict):
+        messages = value.get("messages")
+        if isinstance(messages, list):
+            for message in reversed(messages):
+                found = _find_model(message)
+                if found:
+                    return found
+    return None
+
+
+def _int_attr(value: Any, *names: str) -> int:
+    for name in names:
+        candidate = _get_value(value, name)
+        if candidate is not None:
+            try:
+                return int(candidate)
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _get_value(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def _extract_stream_delta(event: dict[str, Any]) -> str:

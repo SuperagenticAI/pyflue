@@ -37,6 +37,7 @@ Parameters:
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `model` | `str | None` | config value | Model identifier passed to the backend. |
+| `thinking_level` | `str | None` | config value | Reasoning effort hint (`off`, `minimal`, `low`, `medium`, `high`, or `xhigh`) where the backend/model supports it. |
 | `harness` | `str | None` | `deepagents` | Harness backend name. |
 | `sandbox` | `str | None` | `virtual` | Sandbox name. |
 | `python_backend` | `str | None` | config value | Optional Python execution backend, such as `monty`. |
@@ -122,7 +123,14 @@ result = await session.prompt(
     "Return a JSON triage result",
     result=TriageResult,
 )
+print(result.result)
+print(result.usage.total_tokens)
+print(result.model.id)
 ```
+
+Typed responses expose `.result`, `.text`, `.usage`, `.model`, `.metadata`, and
+`.raw`. Attribute access falls back to the parsed value, so existing
+`result.summary` style code continues to work for Pydantic models.
 
 Use a role:
 
@@ -139,6 +147,16 @@ Override the model for a single call:
 result = await session.prompt(
     "Use a larger model for this review",
     model="openai:gpt-5.5",
+)
+```
+
+Set reasoning effort or attach images for one call:
+
+```python
+result = await session.prompt(
+    "Describe this screenshot",
+    thinking_level="high",
+    images=[{"type": "image_url", "image_url": {"url": "https://example.com/screen.png"}}],
 )
 ```
 

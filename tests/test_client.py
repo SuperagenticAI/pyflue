@@ -22,6 +22,8 @@ async def test_client_prompt_and_typed_result():
             json={
                 "text": '---RESULT_START---\n{"summary": "ok"}\n---RESULT_END---',
                 "metadata": {"harness": "test"},
+                "usage": {"input": 2, "output": 3, "total_tokens": 5, "cost": {"total": 0.01}},
+                "model": {"id": "test-model"},
             },
         )
 
@@ -31,6 +33,9 @@ async def test_client_prompt_and_typed_result():
         result = await client.prompt("hello", session_id="s1", result=_Result)
 
     assert result.summary == "ok"
+    assert result.result.summary == "ok"
+    assert result.usage.total_tokens == 5
+    assert result.model.id == "test-model"
 
 
 @pytest.mark.asyncio

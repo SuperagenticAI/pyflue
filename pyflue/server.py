@@ -152,7 +152,25 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
         agent = await get_agent()
         session = await agent.session(agent_id)
         result = await session.prompt(prompt_text)
-        return {"text": result.text, "metadata": result.metadata}
+        return {
+            "text": result.text,
+            "metadata": result.metadata,
+            "usage": {
+                "input": result.usage.input,
+                "output": result.usage.output,
+                "cache_read": result.usage.cache_read,
+                "cache_write": result.usage.cache_write,
+                "total_tokens": result.usage.total_tokens,
+                "cost": {
+                    "input": result.usage.cost.input,
+                    "output": result.usage.cost.output,
+                    "cache_read": result.usage.cost.cache_read,
+                    "cache_write": result.usage.cost.cache_write,
+                    "total": result.usage.cost.total,
+                },
+            },
+            "model": {"id": result.model.id},
+        }
 
     @app.post("/prompt/{agent_id}/events")
     async def prompt_events(agent_id: str, request: Request) -> Any:

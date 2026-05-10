@@ -169,6 +169,7 @@ def _discover_roles(workspace_dir: Path, config: PyFlueConfig) -> dict[str, Role
             description=parsed.get("description", ""),
             instructions=parsed.get("body", ""),
             model=parsed.get("model"),
+            thinking_level=parsed.get("thinking_level"),
             path=file_path,
         )
 
@@ -232,6 +233,7 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
         "name": frontmatter.get("name", ""),
         "description": frontmatter.get("description", ""),
         "model": frontmatter.get("model"),
+        "thinking_level": frontmatter.get("thinking_level"),
         "body": parts[2].strip() if len(parts) > 2 else "",
     }
 

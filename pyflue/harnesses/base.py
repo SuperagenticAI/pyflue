@@ -26,6 +26,7 @@ class HarnessBackend(ABC):
         session_id: str,
         python_backend: Any | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
         stream: bool = False,
     ) -> HarnessResult:
         """Run one prompt turn."""
@@ -53,6 +54,7 @@ class HarnessBackend(ABC):
         session_id: str,
         python_backend: Any | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
+        images: list[Any] | tuple[Any, ...] | None = None,
     ) -> AsyncIterator[PyFlueEvent]:
         """Stream one prompt turn, falling back to one complete delta."""
         result = await self.run(
@@ -64,6 +66,7 @@ class HarnessBackend(ABC):
             session_id=session_id,
             python_backend=python_backend,
             tools=tools,
+            images=images,
             stream=True,
         )
         if result.text:

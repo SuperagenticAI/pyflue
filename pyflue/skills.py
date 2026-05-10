@@ -119,6 +119,7 @@ def parse_role(path: str | Path) -> Role:
         description=str(metadata.get("description", "") or "").strip(),
         instructions=str(post.content or "").strip(),
         model=str(metadata["model"]).strip() if metadata.get("model") else None,
+        thinking_level=str(metadata["thinking_level"]).strip() if metadata.get("thinking_level") else None,
         path=role_path,
     )
 

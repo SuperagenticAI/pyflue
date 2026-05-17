@@ -13,6 +13,15 @@ from pyflue.mcp import (
     connect_mcp_server_stdio,
 )
 from pyflue.routing import AgentRoute, PyFlueContext, discover_agent_routes
+from pyflue.runs import (
+    FlueRun,
+    InMemoryRunStore,
+    RunEvent,
+    generate_run_id,
+    get_default_run_store,
+    observe,
+    unobserve,
+)
 from pyflue.search import BM25Search, SemanticSearch
 from pyflue.skills import Role, Skill, load_roles, load_skills
 from pyflue.types import (
@@ -59,6 +68,13 @@ __all__ = [
     "PyFlueSession",
     "PyFlueSessions",
     "AgentRoute",
+    "FlueRun",
+    "InMemoryRunStore",
+    "RunEvent",
+    "generate_run_id",
+    "get_default_run_store",
+    "observe",
+    "unobserve",
     "BM25Search",
     "CompactionConfig",
     "ProviderSettings",

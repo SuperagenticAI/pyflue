@@ -24,5 +24,7 @@ async def test_file_based_agent_route_invokes_handler(tmp_path):
         config_path=tmp_path / "missing.toml",
     )
 
-    assert result == {"agent_id": "abc", "message": "hi"}
+    assert result["agent_id"] == "abc"
+    assert result["message"] == "hi"
+    assert result["_meta"]["run_id"].startswith("run_")
     assert routes["hello"].triggers == {"webhook": True}

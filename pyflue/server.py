@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ from pyflue.errors import (
     validate_agent_request,
 )
 from pyflue.routing import discover_agent_routes, invoke_route
+from pyflue.runs import get_default_run_store
 
 
 def create_app(config_path: str | Path = "pyflue.toml") -> Any:
@@ -197,6 +199,94 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
 
         return StreamingResponse(events(), media_type="text/event-stream")
 
+    @app.get("/runs/{run_id}")
+    async def get_run(run_id: str) -> dict[str, Any]:
+        store = get_default_run_store()
+        run = store.get_run(run_id)
+        if run is None:
+            raise PyFlueError(
+                type="run_not_found",
+                message=f'Run "{run_id}" is not known to this server.',
+                details="Run history is kept in process memory and may have been evicted.",
+                status=404,
+            )
+        return run.to_dict()
+
+    @app.get("/runs/{run_id}/events")
+    async def get_run_events(run_id: str, request: Request) -> dict[str, Any]:
+        store = get_default_run_store()
+        if store.get_run(run_id) is None:
+            raise PyFlueError(
+                type="run_not_found",
+                message=f'Run "{run_id}" is not known to this server.',
+                details="Run history is kept in process memory and may have been evicted.",
+                status=404,
+            )
+        after, limit, types = _parse_event_query(request.query_params)
+        events = store.get_events(run_id, after=after, limit=limit, types=types)
+        return {
+            "run_id": run_id,
+            "events": [event.to_dict() for event in events],
+            "next_after": events[-1].event_index if events else after,
+        }
+
+    @app.get("/runs/{run_id}/stream")
+    async def stream_run(run_id: str, request: Request) -> Any:
+        store = get_default_run_store()
+        if store.get_run(run_id) is None:
+            raise PyFlueError(
+                type="run_not_found",
+                message=f'Run "{run_id}" is not known to this server.',
+                details="Run history is kept in process memory and may have been evicted.",
+                status=404,
+            )
+        # Respect Last-Event-ID for resume; query ?after= overrides.
+        last_event_id = request.headers.get("last-event-id", "0")
+        try:
+            after = int(request.query_params.get("after") or last_event_id or 0)
+        except ValueError:
+            after = 0
+
+        async def events() -> Any:
+            import anyio
+
+            async def heartbeat() -> Any:
+                while True:
+                    await anyio.sleep(15)
+                    yield ": heartbeat\n\n"
+
+            # Interleave subscriber + 15s heartbeats using a simple race loop.
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            async def pump_events() -> None:
+                async for event in store.subscribe(run_id, after=after):
+                    line = (
+                        f"id: {event.event_index}\n"
+                        f"event: {event.type}\n"
+                        f"data: {json.dumps(event.to_dict())}\n\n"
+                    )
+                    await queue.put(line)
+                await queue.put(None)
+
+            async def pump_heartbeat() -> None:
+                while True:
+                    await asyncio.sleep(15)
+                    await queue.put(": heartbeat\n\n")
+
+            ev_task = asyncio.create_task(pump_events())
+            hb_task = asyncio.create_task(pump_heartbeat())
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        return
+                    yield item
+            finally:
+                hb_task.cancel()
+                ev_task.cancel()
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
     @app.post("/sessions/{session_id}/abort")
     async def abort_session(session_id: str) -> dict[str, Any]:
         agent = await get_agent()
@@ -205,6 +295,52 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
         return {"aborted": aborted, "session_id": session_id}
 
     return app
+
+
+def _parse_event_query(query: Any) -> tuple[int, int, list[str] | None]:
+    """Validate and return ``(after, limit, types)`` from a query mapping.
+
+    Raises ``PyFlueError`` (status 400) on malformed values so the server's
+    error handler renders the canonical envelope.
+    """
+
+    def _bad(field: str, value: str, reason: str) -> PyFlueError:
+        return PyFlueError(
+            type="invalid_query_param",
+            message=f'Invalid value for query parameter "{field}".',
+            details=reason,
+            status=400,
+            meta={"param": field, "value": value},
+        )
+
+    raw_after = query.get("after")
+    after = 0
+    if raw_after is not None and raw_after != "":
+        try:
+            after = int(raw_after)
+        except ValueError as exc:
+            raise _bad("after", str(raw_after), "Must be a non-negative integer.") from exc
+        if after < 0:
+            raise _bad("after", str(raw_after), "Must be a non-negative integer.")
+
+    raw_limit = query.get("limit")
+    limit = 1000
+    if raw_limit is not None and raw_limit != "":
+        try:
+            limit = int(raw_limit)
+        except ValueError as exc:
+            raise _bad("limit", str(raw_limit), "Must be an integer in [1, 1000].") from exc
+        if limit < 1 or limit > 1000:
+            raise _bad("limit", str(raw_limit), "Must be an integer in [1, 1000].")
+
+    raw_types = query.get("types")
+    types: list[str] | None = None
+    if raw_types:
+        types = [t.strip() for t in raw_types.split(",") if t.strip()]
+        if not types:
+            raise _bad("types", str(raw_types), "Must be a comma-separated list of event types.")
+
+    return after, limit, types
 
 
 def _mtime(path: Path) -> float | None:

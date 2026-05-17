@@ -247,6 +247,67 @@ def build(
         console.print("Generated " + ", ".join(str(path) for path in paths))
 
 
+@app.command("logs")
+def logs(
+    run_id: str = typer.Argument(..., help="Run id returned by an agent invocation."),
+    server: str = typer.Option("http://127.0.0.1:2024", "--server", help="PyFlue server base URL."),
+    follow: bool = typer.Option(True, "--follow/--no-follow"),
+    since: int = typer.Option(0, "--since", help="Only show events with event_index > since."),
+    types: str | None = typer.Option(None, "--types", help="Comma-separated event types to include."),
+    limit: int = typer.Option(1000, "--limit", help="Max events when not following."),
+    format: str = typer.Option("pretty", "--format", help="pretty | json | ndjson"),
+) -> None:
+    """Replay or tail a run's event log from a running PyFlue server."""
+    if format not in {"pretty", "json", "ndjson"}:
+        raise typer.BadParameter("--format must be one of: pretty, json, ndjson")
+
+    async def _run() -> None:
+        import httpx
+
+        base = server.rstrip("/")
+        async with httpx.AsyncClient(timeout=None) as client:
+            if not follow:
+                params: dict[str, Any] = {"after": since, "limit": limit}
+                if types:
+                    params["types"] = types
+                resp = await client.get(f"{base}/runs/{run_id}/events", params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+                _render_events(payload.get("events", []), format)
+                return
+
+            # Follow: stream SSE.
+            headers = {"Accept": "text/event-stream"}
+            if since:
+                headers["Last-Event-ID"] = str(since)
+            type_filter = {t.strip() for t in types.split(",")} if types else None
+            async with client.stream(
+                "GET", f"{base}/runs/{run_id}/stream", headers=headers
+            ) as resp:
+                resp.raise_for_status()
+                event_type = None
+                data_lines: list[str] = []
+                async for raw_line in resp.aiter_lines():
+                    if raw_line == "":
+                        if data_lines:
+                            payload = json.loads("\n".join(data_lines))
+                            if type_filter is None or payload.get("type") in type_filter:
+                                _render_event(payload, format)
+                            if payload.get("type") == "run_end":
+                                return
+                        event_type = None
+                        data_lines = []
+                        continue
+                    if raw_line.startswith(":"):
+                        continue
+                    if raw_line.startswith("event:"):
+                        event_type = raw_line[len("event:"):].strip()
+                    elif raw_line.startswith("data:"):
+                        data_lines.append(raw_line[len("data:"):].lstrip())
+
+    asyncio.run(_run())
+
+
 @app.command()
 def deploy(target: DeployTarget = "docker", dry_run: bool = False) -> None:
     """Deploy the PyFlue agent using the configured harness."""
@@ -443,3 +504,33 @@ def _strip_env_value(value: str) -> str:
 
 def _parse_payload(payload: str | None) -> dict[str, Any]:
     return json.loads(payload or "{}")
+
+
+def _render_events(events: list[dict[str, Any]], format: str) -> None:
+    if format == "json":
+        console.print_json(data={"events": events})
+        return
+    for event in events:
+        _render_event(event, format)
+
+
+def _render_event(event: dict[str, Any], format: str) -> None:
+    if format == "ndjson":
+        console.print(json.dumps(event))
+        return
+    if format == "json":
+        console.print_json(data=event)
+        return
+    # pretty
+    idx = event.get("event_index", "?")
+    typ = event.get("type", "?")
+    data = event.get("data") or {}
+    detail = ""
+    if typ == "log":
+        level = data.get("level", "info")
+        detail = f"  [{level}] {data.get('message', '')}"
+    elif typ == "run_end":
+        detail = f"  status={data.get('status')} is_error={data.get('is_error')}"
+    elif data:
+        detail = "  " + json.dumps(data)[:200]
+    console.print(f"[{idx:>4}] {typ}{detail}")

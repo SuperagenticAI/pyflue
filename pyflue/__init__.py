@@ -1,9 +1,10 @@
 """PyFlue public API."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
-from pyflue.client import PyFlueClient
-from pyflue.core import PyFlueAgent, PyFlueSession, PyFlueSessions, init
+from pyflue.client import PyFlueClient, create_flue_client, createFlueClient
+from pyflue.config import define_config
+from pyflue.core import PyFlueAgent, PyFlueFs, PyFlueSession, PyFlueSessions, init
 from pyflue.harnesses.registry import register_harness
 from pyflue.mcp import (
     MCPClient,
@@ -15,8 +16,17 @@ from pyflue.mcp import (
 from pyflue.routing import AgentRoute, PyFlueContext, discover_agent_routes
 from pyflue.runs import (
     FlueRun,
+    InMemoryRunRegistry,
     InMemoryRunStore,
+    InstancePointer,
     RunEvent,
+    RunPointer,
+    SQLiteRunRegistry,
+    SQLiteRunStore,
+    decode_instance_cursor,
+    decode_run_cursor,
+    encode_instance_cursor,
+    encode_run_cursor,
     generate_run_id,
     get_default_run_store,
     observe,
@@ -24,6 +34,7 @@ from pyflue.runs import (
 )
 from pyflue.search import BM25Search, SemanticSearch
 from pyflue.skills import Role, Skill, load_roles, load_skills
+from pyflue.tools import create_tools, createTools, define_tool
 from pyflue.types import (
     AgentInfo,
     BuildContext,
@@ -45,6 +56,7 @@ from pyflue.types import (
     PyFlueEvent,
     PyFlueEventCallback,
     ThinkingLevel,
+    ToolDef,
     define_command,
 )
 
@@ -61,16 +73,28 @@ __all__ = [
     "McpStdioServerOptions",
     "PyFlueAgent",
     "PyFlueClient",
+    "createFlueClient",
+    "create_flue_client",
     "PyFlueCommand",
     "PyFlueContext",
     "PyFlueEvent",
     "PyFlueEventCallback",
+    "PyFlueFs",
     "PyFlueSession",
     "PyFlueSessions",
     "AgentRoute",
     "FlueRun",
     "InMemoryRunStore",
+    "InMemoryRunRegistry",
+    "InstancePointer",
     "RunEvent",
+    "RunPointer",
+    "SQLiteRunStore",
+    "SQLiteRunRegistry",
+    "decode_instance_cursor",
+    "decode_run_cursor",
+    "encode_instance_cursor",
+    "encode_run_cursor",
     "generate_run_id",
     "get_default_run_store",
     "observe",
@@ -89,10 +113,15 @@ __all__ = [
     "Role",
     "Skill",
     "ThinkingLevel",
+    "ToolDef",
     "connect_mcp_server",
     "connect_mcp_server_stdio",
+    "createTools",
+    "create_tools",
+    "define_config",
     "discover_agent_routes",
     "define_command",
+    "define_tool",
     "init",
     "load_roles",
     "load_skills",

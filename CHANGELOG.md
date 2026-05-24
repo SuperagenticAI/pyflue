@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.5
+
+- Added Flue-style HTTP run/admin parity: SSE/webhook agent routes, run event APIs, admin OpenAPI schemas, opaque admin cursors, and `X-Flue-Run-Id` headers.
+- Added Python client parity helpers: `create_flue_client()`, `createFlueClient`, Flue-style agent invoke options, and optional SDK-shaped invoke results.
+- Added durable SQLite run/event history and a Flue-style run pointer registry with in-memory and SQLite implementations.
+- Added Cloudflare and provider build target parity for workspace builds, including Cloudflare Containers artifacts.
+- Added `pyflue.config.py` support with `define_config()`.
+- Added Flue-style `session.fs` / `agent.fs` filesystem facades.
+- Added Flue-style `ToolDef`, `define_tool()`, `create_tools()`, and `createTools`.
+- Expanded docs and tests for the new parity surfaces.
+
 ## 0.1.4
 
 - Added stable prompt response usage and selected-model metadata.

@@ -18,7 +18,18 @@ from pyflue.types import (
     Role,
 )
 
-BuildTarget = Literal["uvicorn", "lambda", "docker", "cloudrun"]
+BuildTarget = Literal[
+    "uvicorn",
+    "lambda",
+    "docker",
+    "cloudrun",
+    "railway",
+    "render",
+    "fly",
+    "vercel",
+    "netlify",
+    "cloudflare",
+]
 
 
 class BuildResult:
@@ -36,7 +47,7 @@ def build(options: BuildOptions) -> BuildResult:
     Args:
         options.workspace_dir: Directory containing agents/ and roles/
         options.output_dir: Where to write dist/ directory
-        options.target: Build target (uvicorn, lambda, docker, cloudrun)
+        options.target: Build target such as uvicorn, docker, or a provider target.
         options.plugin: Override with a custom plugin
 
     Returns:
@@ -129,12 +140,26 @@ def _resolve_plugin(options: BuildOptions) -> BuildPlugin:
             "  pyflue build --target uvicorn\n"
             "  pyflue build --target lambda\n"
             "  pyflue build --target docker\n"
-            "  pyflue build --target cloudrun"
+            "  pyflue build --target cloudrun\n"
+            "  pyflue build --target railway\n"
+            "  pyflue build --target render\n"
+            "  pyflue build --target fly\n"
+            "  pyflue build --target vercel\n"
+            "  pyflue build --target netlify\n"
+            "  pyflue build --target cloudflare"
         )
 
+    from pyflue.builder.plugins.cloudflare import CloudflarePlugin
     from pyflue.builder.plugins.cloudrun import CloudRunPlugin
     from pyflue.builder.plugins.docker import DockerPlugin
     from pyflue.builder.plugins.lambda_ import LambdaPlugin
+    from pyflue.builder.plugins.providers import (
+        FlyPlugin,
+        NetlifyPlugin,
+        RailwayPlugin,
+        RenderPlugin,
+        VercelPlugin,
+    )
     from pyflue.builder.plugins.uvicorn import UvicornPlugin
 
     plugins = {
@@ -142,6 +167,12 @@ def _resolve_plugin(options: BuildOptions) -> BuildPlugin:
         "lambda": LambdaPlugin,
         "docker": DockerPlugin,
         "cloudrun": CloudRunPlugin,
+        "railway": RailwayPlugin,
+        "render": RenderPlugin,
+        "fly": FlyPlugin,
+        "vercel": VercelPlugin,
+        "netlify": NetlifyPlugin,
+        "cloudflare": CloudflarePlugin,
     }
 
     if options.target not in plugins:

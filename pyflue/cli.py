@@ -217,12 +217,23 @@ def build(
     output: Path | None = OUTPUT_OPTION,
 ) -> None:
     """Generate deployment artifacts."""
-    new_targets = {"uvicorn", "lambda", "docker", "cloudrun"}
+    new_targets = {
+        "uvicorn",
+        "lambda",
+        "docker",
+        "cloudrun",
+        "railway",
+        "render",
+        "fly",
+        "vercel",
+        "netlify",
+        "cloudflare",
+    }
 
     if target in new_targets:
         workspace_dir = workspace or resolve_workspace_from_cwd()
         if not workspace_dir:
-            if target == "docker":
+            if target not in {"uvicorn", "lambda", "cloudrun"}:
                 paths = write_deploy_artifacts(target)
                 console.print("Generated " + ", ".join(str(path) for path in paths))
                 return
@@ -285,7 +296,6 @@ def logs(
                 "GET", f"{base}/runs/{run_id}/stream", headers=headers
             ) as resp:
                 resp.raise_for_status()
-                event_type = None
                 data_lines: list[str] = []
                 async for raw_line in resp.aiter_lines():
                     if raw_line == "":
@@ -295,13 +305,12 @@ def logs(
                                 _render_event(payload, format)
                             if payload.get("type") == "run_end":
                                 return
-                        event_type = None
                         data_lines = []
                         continue
                     if raw_line.startswith(":"):
                         continue
                     if raw_line.startswith("event:"):
-                        event_type = raw_line[len("event:"):].strip()
+                        continue
                     elif raw_line.startswith("data:"):
                         data_lines.append(raw_line[len("data:"):].lstrip())
 

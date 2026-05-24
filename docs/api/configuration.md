@@ -1,6 +1,8 @@
 # Configuration
 
-PyFlue reads `pyflue.toml` by default.
+PyFlue reads `pyflue.toml` by default. If that file is absent, it falls back to
+`pyflue.config.py`. You can also pass either file explicitly with
+`config_path=...` or `--config`.
 
 ```toml
 [agent]
@@ -43,6 +45,36 @@ api_key = "gateway-key"
 [providers.openai.headers]
 X-Team = "agents"
 ```
+
+The equivalent Python config format is:
+
+```python
+from pyflue import define_config
+
+config = define_config({
+    "agent": {
+        "model": "openai:gpt-5.5",
+        "harness": "deepagents",
+        "sandbox": "virtual",
+        "agents_dir": "agents",
+        "allowed_commands": ["git", "pytest"],
+    },
+    "providers": {
+        "openai": {
+            "base_url": "https://gateway.example.com/openai",
+            "api_key": "gateway-key",
+            "headers": {"X-Team": "agents"},
+        },
+    },
+    "compaction": {
+        "enabled": True,
+        "context_window_tokens": 128000,
+    },
+})
+```
+
+`pyflue.config.py` must define `config`, `CONFIG`, or `default` as a dictionary
+with the same shape as `pyflue.toml`, or as a `PyFlueConfig` instance.
 
 ## Agent Settings
 

@@ -149,6 +149,7 @@ class PyFlueConfig:
     sandbox: str = "virtual"
     python_backend: str | None = None
     root: Path = field(default_factory=Path.cwd)
+    config_path: Path | None = None
     skills_dir: Path | None = None
     roles_dir: Path | None = None
     agents_dir: Path | None = None
@@ -203,6 +204,20 @@ class PyFlueCommand:
     cwd: str | None = None
     env: dict[str, str] | None = None
     timeout: int | None = 120
+
+
+@dataclass(frozen=True)
+class ToolDef:
+    """Flue-compatible custom tool definition.
+
+    ``execute`` receives the tool arguments as one dictionary, matching Flue's
+    ``ToolDef.execute(args)`` contract.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
+    execute: Callable[[dict[str, Any]], Any] | None = None
 
 
 def define_command(
@@ -316,6 +331,17 @@ class BuildOptions:
 
     workspace_dir: str | Path
     output_dir: str | Path
-    target: Literal["uvicorn", "lambda", "docker", "cloudrun"] | None = None
+    target: Literal[
+        "uvicorn",
+        "lambda",
+        "docker",
+        "cloudrun",
+        "railway",
+        "render",
+        "fly",
+        "vercel",
+        "netlify",
+        "cloudflare",
+    ] | None = None
     plugin: BuildPlugin | None = None
     config_path: str | Path | None = None

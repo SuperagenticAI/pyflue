@@ -34,6 +34,7 @@ from pyflue.skills import (
     parse_skill_text,
     render_skill_prompt,
 )
+from pyflue.tools import to_callable_tool
 from pyflue.types import (
     HarnessResult,
     PromptResultResponse,
@@ -225,6 +226,7 @@ class PyFlueAgent:
         self.sandbox_state_dir = config.root / ".pyflue" / "sandboxes"
         self.sandbox_state_dir.mkdir(parents=True, exist_ok=True)
         self.sessions = PyFlueSessions(self)
+        self.fs = _AgentFlueFs(self)
         self.tools = list(tools or ())
         self.commands: tuple[str, ...] = tuple(
             str(item) for item in commands or () if not isinstance(item, PyFlueCommand)
@@ -501,6 +503,7 @@ class PyFlueSession:
             self.agent.config.python_backend,
             sandbox=self.sandbox,
         )
+        self.fs = PyFlueFs(self)
         self.context_root = self.agent.config.root
         self.instructions = self.agent.instructions
         self.skills = self.agent.skills
@@ -1535,17 +1538,18 @@ class PyFlueSession:
         await self.agent._ensure_mcp_servers()
         result = self._builtin_tools()
         command_tools = self._command_tools()
+        agent_tools = [to_callable_tool(tool) for tool in self.agent.tools]
+        extra_tool_list = [to_callable_tool(tool) for tool in list(extra_tools or ())]
         self._validate_tool_names(
             builtin_tools=result,
-            agent_tools=[*self.agent.tools, *command_tools],
+            agent_tools=[*agent_tools, *command_tools],
             mcp_tools=self.agent._mcp_tools,
-            extra_tools=list(extra_tools or ()),
+            extra_tools=extra_tool_list,
         )
-        result.extend(self.agent.tools)
+        result.extend(agent_tools)
         result.extend(command_tools)
         result.extend(self.agent._mcp_tools)
-        if extra_tools:
-            result.extend(extra_tools)
+        result.extend(extra_tool_list)
         return result
 
     def _command_tools(self) -> list[Any]:
@@ -2159,9 +2163,126 @@ def _file_info_dict(info: Any) -> dict[str, Any]:
         "path": info.path,
         "is_dir": bool(info.is_dir),
         "is_file": bool(getattr(info, "is_file", False)),
+        "is_directory": bool(info.is_dir),
+        "is_symbolic_link": bool(getattr(info, "is_symbolic_link", False)),
+        "isDirectory": bool(info.is_dir),
+        "isFile": bool(getattr(info, "is_file", False)),
+        "isSymbolicLink": bool(getattr(info, "is_symbolic_link", False)),
         "size": int(info.size or 0),
         "mtime": getattr(info, "mtime", None),
     }
+
+
+class PyFlueFs:
+    """Out-of-band filesystem access for a PyFlue session sandbox.
+
+    This mirrors Flue's `session.fs` surface while keeping PyFlue's existing
+    direct session helpers (`read_file`, `write_file`, etc.) available.
+    """
+
+    def __init__(self, session: PyFlueSession):
+        self._session = session
+
+    async def read_file(self, path: str) -> str:
+        """Read a UTF-8 file from the session sandbox."""
+        self._session._assert_active()
+        return self._session.sandbox.read_file(path)
+
+    async def read_bytes(self, path: str) -> bytes:
+        """Read a file as raw bytes from the session sandbox."""
+        self._session._assert_active()
+        return self._session.sandbox.read_bytes(path)
+
+    async def read_file_buffer(self, path: str) -> bytes:
+        """Alias for Flue's `readFileBuffer`."""
+        return await self.read_bytes(path)
+
+    async def write_file(self, path: str, content: str | bytes) -> None:
+        """Write text or bytes to the session sandbox."""
+        self._session._assert_active()
+        if isinstance(content, bytes):
+            self._session.sandbox.write_bytes(path, content)
+        else:
+            self._session.sandbox.write_file(path, content)
+
+    async def stat(self, path: str) -> dict[str, Any]:
+        """Return normalized metadata for a sandbox path."""
+        self._session._assert_active()
+        return _file_info_dict(self._session.sandbox.stat(path))
+
+    async def readdir(self, path: str) -> list[str]:
+        """List directory entry names."""
+        self._session._assert_active()
+        entries = self._session.sandbox.list_files(path)
+        prefix = str(_file_info_dict(self._session.sandbox.stat(path))["path"]).rstrip("/")
+        names: list[str] = []
+        for entry in entries:
+            entry_path = str(getattr(entry, "path", ""))
+            name = entry_path.removeprefix(prefix).strip("/")
+            names.append(name or entry_path.strip("/"))
+        return sorted(names)
+
+    async def exists(self, path: str) -> bool:
+        """Return whether a file or directory exists."""
+        self._session._assert_active()
+        return bool(self._session.sandbox.exists(path))
+
+    async def mkdir(self, path: str, *, recursive: bool = True) -> None:
+        """Create a directory in the session sandbox."""
+        self._session._assert_active()
+        self._session.sandbox.mkdir(path, recursive=recursive)
+
+    async def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> None:
+        """Remove a file or directory from the session sandbox."""
+        self._session._assert_active()
+        self._session.sandbox.rm(path, recursive=recursive, force=force)
+
+    readFile = read_file
+    readBytes = read_bytes
+    readFileBuffer = read_file_buffer
+    writeFile = write_file
+
+
+class _AgentFlueFs:
+    """Default-session filesystem access for a PyFlue agent."""
+
+    def __init__(self, agent: PyFlueAgent):
+        self._agent = agent
+
+    async def _fs(self) -> PyFlueFs:
+        return (await self._agent.session()).fs
+
+    async def read_file(self, path: str) -> str:
+        return await (await self._fs()).read_file(path)
+
+    async def read_bytes(self, path: str) -> bytes:
+        return await (await self._fs()).read_bytes(path)
+
+    async def read_file_buffer(self, path: str) -> bytes:
+        return await (await self._fs()).read_file_buffer(path)
+
+    async def write_file(self, path: str, content: str | bytes) -> None:
+        await (await self._fs()).write_file(path, content)
+
+    async def stat(self, path: str) -> dict[str, Any]:
+        return await (await self._fs()).stat(path)
+
+    async def readdir(self, path: str) -> list[str]:
+        return await (await self._fs()).readdir(path)
+
+    async def exists(self, path: str) -> bool:
+        return await (await self._fs()).exists(path)
+
+    async def mkdir(self, path: str, *, recursive: bool = True) -> None:
+        await (await self._fs()).mkdir(path, recursive=recursive)
+
+    async def rm(self, path: str, *, recursive: bool = False, force: bool = False) -> None:
+        await (await self._fs()).rm(path, recursive=recursive, force=force)
+
+    readFile = read_file
+    readBytes = read_bytes
+    readFileBuffer = read_file_buffer
+    writeFile = write_file
 
 
 class _ScopedSandbox:

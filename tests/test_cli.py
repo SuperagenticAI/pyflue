@@ -68,6 +68,25 @@ def test_cli_build_targets(tmp_path, monkeypatch):
     assert (tmp_path / "package.json").exists()
 
 
+def test_cli_build_provider_target_uses_workspace_build(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    (agents / "default.py").write_text(
+        "async def default(context):\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["build", "--target", "railway"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "dist" / "server.py").exists()
+    assert (tmp_path / "dist" / "railway.json").exists()
+    assert not (tmp_path / "app.py").exists()
+
+
 def test_cli_deploy_writes_manifest(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()

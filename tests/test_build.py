@@ -7,9 +7,17 @@ import py_compile
 import pytest
 
 from pyflue._builder import BuildOptions, build, resolve_workspace_from_cwd
+from pyflue.builder.plugins.cloudflare import CloudflarePlugin
 from pyflue.builder.plugins.cloudrun import CloudRunPlugin
 from pyflue.builder.plugins.docker import DockerPlugin
 from pyflue.builder.plugins.lambda_ import LambdaPlugin
+from pyflue.builder.plugins.providers import (
+    FlyPlugin,
+    NetlifyPlugin,
+    RailwayPlugin,
+    RenderPlugin,
+    VercelPlugin,
+)
 from pyflue.builder.plugins.uvicorn import UvicornPlugin
 from pyflue.types import AgentInfo, BuildContext, PyFlueConfig
 
@@ -172,6 +180,60 @@ def test_cloudrun_plugin_additional_outputs():
     assert "gunicorn" in outputs["Dockerfile"]
 
 
+def test_cloudflare_plugin_generates_container_worker_outputs(tmp_path):
+    plugin = CloudflarePlugin()
+    ctx = BuildContext(
+        agents=[
+            AgentInfo(name="hello", file_path=tmp_path / "hello.py", triggers={"webhook": True}),
+            AgentInfo(name="ops", file_path=tmp_path / "ops.py", triggers={}),
+        ],
+        roles={},
+        workspace_dir=tmp_path,
+        output_dir=tmp_path,
+        config=PyFlueConfig(),
+    )
+
+    code = plugin.generate_entry_point(ctx)
+    outputs = plugin.additional_outputs(ctx)
+
+    assert "create_app" in code
+    assert "worker.ts" in outputs
+    assert "wrangler.jsonc" in outputs
+    assert "package.json" in outputs
+    assert "class PyFlueContainer extends Container" in outputs["worker.ts"]
+    assert '"max_instances": 2' in outputs["wrangler.jsonc"]
+    assert "@cloudflare/containers" in outputs["package.json"]
+
+
+@pytest.mark.parametrize(
+    ("plugin_cls", "expected_file", "expected_text"),
+    [
+        (RailwayPlugin, "railway.json", '"builder": "DOCKERFILE"'),
+        (RenderPlugin, "render.yaml", "runtime: docker"),
+        (FlyPlugin, "fly.toml", "[http_service]"),
+        (VercelPlugin, "vercel.json", '"dest": "server.py"'),
+        (NetlifyPlugin, "netlify.toml", "netlify/functions"),
+    ],
+)
+def test_provider_plugins_generate_provider_outputs(plugin_cls, expected_file, expected_text):
+    plugin = plugin_cls()
+    ctx = BuildContext(
+        agents=[],
+        roles={},
+        workspace_dir=None,
+        output_dir=None,
+        config=PyFlueConfig(),
+    )
+
+    code = plugin.generate_entry_point(ctx)
+    outputs = plugin.additional_outputs(ctx)
+
+    assert "create_app" in code
+    assert expected_file in outputs
+    assert expected_text in outputs[expected_file]
+    assert "requirements.txt" in outputs
+
+
 @pytest.mark.asyncio
 async def test_build_with_workspace(tmp_path):
     """Test build function with a proper workspace."""
@@ -225,6 +287,64 @@ async def test_build_docker_generates_matching_server_entry(tmp_path):
     assert "server.py" in generated
     assert "Dockerfile" in generated
     assert 'CMD ["python", "server.py"]' in (tmp_path / "dist" / "Dockerfile").read_text()
+    py_compile.compile(tmp_path / "dist" / "server.py", doraise=True)
+
+
+@pytest.mark.asyncio
+async def test_build_cloudflare_generates_worker_and_container_files(tmp_path):
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "hello.py").write_text(
+        "triggers = {'webhook': True}\n"
+        "async def default(context):\n"
+        "    return {'message': 'hello'}\n",
+        encoding="utf-8",
+    )
+
+    result = build(BuildOptions(
+        workspace_dir=str(tmp_path),
+        output_dir=str(tmp_path),
+        target="cloudflare",
+    ))
+
+    generated = {path.name for path in result.generated_files}
+    assert {"server.py", "Dockerfile", "worker.ts", "wrangler.jsonc", "package.json"} <= generated
+    assert "PyFlueContainer" in (tmp_path / "dist" / "worker.ts").read_text()
+    assert '"main": "worker.ts"' in (tmp_path / "dist" / "wrangler.jsonc").read_text()
+    assert "@cloudflare/containers" in (tmp_path / "dist" / "package.json").read_text()
+    py_compile.compile(tmp_path / "dist" / "server.py", doraise=True)
+
+
+@pytest.mark.parametrize(
+    ("target", "provider_file"),
+    [
+        ("railway", "railway.json"),
+        ("render", "render.yaml"),
+        ("fly", "fly.toml"),
+        ("vercel", "vercel.json"),
+        ("netlify", "netlify.toml"),
+    ],
+)
+def test_build_provider_targets_use_workspace_build_system(tmp_path, target, provider_file):
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "hello.py").write_text(
+        "triggers = {'webhook': True}\n"
+        "async def default(context):\n"
+        "    return {'message': 'hello'}\n",
+        encoding="utf-8",
+    )
+
+    result = build(BuildOptions(
+        workspace_dir=str(tmp_path),
+        output_dir=str(tmp_path),
+        target=target,
+    ))
+
+    generated = {path.name for path in result.generated_files}
+    assert "server.py" in generated
+    assert provider_file in generated
+    assert (tmp_path / "dist" / provider_file).exists()
     py_compile.compile(tmp_path / "dist" / "server.py", doraise=True)
 
 

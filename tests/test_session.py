@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from pyflue.core import PyFlueAgent
 from pyflue.harnesses.base import HarnessBackend
 from pyflue.sandbox import SandboxPolicy
+from pyflue.tools import create_tools, define_tool
 from pyflue.types import (
     CompactionConfig,
     HarnessResult,
@@ -19,6 +20,7 @@ from pyflue.types import (
     PyFlueCommand,
     PyFlueConfig,
     PyFlueEvent,
+    ToolDef,
     define_command,
 )
 
@@ -305,6 +307,45 @@ async def test_agent_shell_uses_default_session(tmp_path):
     result = await agent.shell("printf agent")
 
     assert result["stdout"] == "agent"
+
+
+@pytest.mark.asyncio
+async def test_session_fs_facade_matches_flue_filesystem_surface(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config, sandbox_policy=SandboxPolicy(allow_write=True))
+    session = await agent.session("s1")
+
+    await session.fs.mkdir("data")
+    await session.fs.write_file("data/note.txt", "hello")
+    await session.fs.writeFile("data/blob.bin", b"\x00pyflue")
+
+    assert await session.fs.read_file("data/note.txt") == "hello"
+    assert await session.fs.readFile("data/note.txt") == "hello"
+    assert await session.fs.read_file_buffer("data/blob.bin") == b"\x00pyflue"
+    assert await session.fs.readdir("data") == ["blob.bin", "note.txt"]
+    assert await session.fs.exists("data/note.txt") is True
+
+    metadata = await session.fs.stat("data/note.txt")
+    assert metadata["is_file"] is True
+    assert metadata["isFile"] is True
+    assert metadata["is_directory"] is False
+    assert metadata["isDirectory"] is False
+    assert metadata["size"] == 5
+
+    await session.fs.rm("data/blob.bin")
+    assert await session.fs.exists("data/blob.bin") is False
+
+
+@pytest.mark.asyncio
+async def test_agent_fs_uses_default_session(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config, sandbox_policy=SandboxPolicy(allow_write=True))
+
+    await agent.fs.mkdir("shared")
+    await agent.fs.write_file("shared/value.txt", "agent")
+
+    assert await agent.fs.read_file("shared/value.txt") == "agent"
+    assert await (await agent.session()).read_file("shared/value.txt") == "agent"
 
 
 @pytest.mark.asyncio
@@ -927,6 +968,67 @@ async def test_session_prompt_passes_scoped_tools(tmp_path):
         "task",
         "lookup",
     ]
+
+
+@pytest.mark.asyncio
+async def test_tool_def_objects_are_prompt_tools(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+
+    async def lookup(args: dict[str, str]) -> str:
+        return f"issue:{args['issue']}"
+
+    tool = ToolDef(
+        name="lookup_issue",
+        description="Look up an issue.",
+        parameters={"type": "object", "properties": {"issue": {"type": "string"}}},
+        execute=lookup,
+    )
+    agent = PyFlueAgent(config=config, tools=[tool])
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    await (await agent.session("s1")).prompt("hello")
+    tools = {item.__name__: item for item in agent.backend.calls[0]["tools"]}
+
+    assert await tools["lookup_issue"](issue="123") == "issue:123"
+    assert tools["lookup_issue"].__doc__ == "Look up an issue."
+    assert tools["lookup_issue"].__pyflue_schema__ == tool.parameters
+
+
+@pytest.mark.asyncio
+async def test_create_tools_and_define_tool_helpers(tmp_path):
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+
+    def lookup(args: dict[str, str]) -> dict[str, str]:
+        return {"value": args["value"]}
+
+    tools = create_tools([
+        define_tool(
+            "lookup_value",
+            lookup,
+            description="Look up a value.",
+            parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        )
+    ])
+    agent = PyFlueAgent(config=config)
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    await (await agent.session("s1")).prompt("hello", tools=tools)
+    call_tools = {item.__name__: item for item in agent.backend.calls[0]["tools"]}
+
+    assert await call_tools["lookup_value"](value="x") == {"value": "x"}
+    assert call_tools["lookup_value"].__pyflue_schema__ == tools[0].__pyflue_schema__
+
+
+def test_tool_helpers_are_exported_from_root():
+    from pyflue import ToolDef as RootToolDef
+    from pyflue import create_tools as root_create_tools
+    from pyflue import createTools
+    from pyflue import define_tool as root_define_tool
+
+    tool = root_define_tool("noop", lambda args: args)
+    assert isinstance(tool, RootToolDef)
+    assert createTools([tool])[0].__name__ == "noop"
+    assert root_create_tools([tool])[0].__name__ == "noop"
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,9 @@ PyFlue is a Python package, so deployment is centered on Python runtimes,
 containers, and CI jobs.
 
 The closest PyFlue equivalent to a JavaScript server target is the Docker and
-FastAPI target. It produces a small `app.py` and `Dockerfile` that can run on
-any platform that accepts a Python container.
+FastAPI target. In a workspace, runtime builds write a `dist/` directory with
+`server.py`, `manifest.json`, provider config, and any container files needed
+by the selected platform.
 
 ## Supported Targets
 
@@ -170,9 +171,11 @@ pyflue build --target railway
 This writes:
 
 ```text
-Dockerfile
-app.py
-railway.json
+dist/server.py
+dist/Dockerfile
+dist/requirements.txt
+dist/railway.json
+dist/manifest.json
 ```
 
 Deploy the project with Railway's GitHub integration or CLI.
@@ -195,9 +198,11 @@ pyflue build --target render
 This writes:
 
 ```text
-Dockerfile
-app.py
-render.yaml
+dist/server.py
+dist/Dockerfile
+dist/requirements.txt
+dist/render.yaml
+dist/manifest.json
 ```
 
 Create a new Blueprint in Render and point it at the repository.
@@ -213,9 +218,11 @@ pyflue build --target fly
 This writes:
 
 ```text
-Dockerfile
-app.py
-fly.toml
+dist/server.py
+dist/Dockerfile
+dist/requirements.txt
+dist/fly.toml
+dist/manifest.json
 ```
 
 Review the generated app name and region before deploying with `fly deploy`.
@@ -237,11 +244,13 @@ pyflue build --target cloudflare
 This target generates:
 
 ```text
-Dockerfile
-app.py
-worker.ts
-wrangler.jsonc
-package.json
+dist/server.py
+dist/Dockerfile
+dist/requirements.txt
+dist/worker.ts
+dist/wrangler.jsonc
+dist/package.json
+dist/manifest.json
 ```
 
 Cloudflare Containers are currently a beta Workers feature and require a
@@ -266,9 +275,10 @@ pyflue build --target vercel
 This writes:
 
 ```text
-Dockerfile
-app.py
-vercel.json
+dist/server.py
+dist/requirements.txt
+dist/vercel.json
+dist/manifest.json
 ```
 
 Review the generated route config before deploying.
@@ -291,9 +301,11 @@ pyflue build --target netlify
 This writes:
 
 ```text
-Dockerfile
-app.py
-netlify.toml
+dist/server.py
+dist/requirements.txt
+dist/netlify.toml
+dist/netlify/functions/pyflue.py
+dist/manifest.json
 ```
 
 Review the generated function settings before deploying.

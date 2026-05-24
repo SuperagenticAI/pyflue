@@ -140,16 +140,18 @@ Available targets:
 | `docker` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/manifest.json` |
 | `github-actions` | Implemented | `.github/workflows/pyflue-agent.yml` |
 | `gitlab-ci` | Implemented | `.gitlab-ci.yml` |
-| `railway` | Implemented | `Dockerfile`, `app.py`, `railway.json` |
-| `render` | Implemented | `Dockerfile`, `app.py`, `render.yaml` |
-| `fly` | Implemented | `Dockerfile`, `app.py`, `fly.toml` |
-| `vercel` | Implemented | `Dockerfile`, `app.py`, `vercel.json` |
-| `netlify` | Implemented | `Dockerfile`, `app.py`, `netlify.toml` |
-| `cloudflare` | Beta | `Dockerfile`, `app.py`, `worker.ts`, `wrangler.jsonc`, `package.json` |
+| `railway` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/railway.json`, `dist/manifest.json` |
+| `render` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/render.yaml`, `dist/manifest.json` |
+| `fly` | Implemented | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/fly.toml`, `dist/manifest.json` |
+| `vercel` | Implemented | `dist/server.py`, `dist/requirements.txt`, `dist/vercel.json`, `dist/manifest.json` |
+| `netlify` | Implemented | `dist/server.py`, `dist/requirements.txt`, `dist/netlify.toml`, `dist/netlify/functions/pyflue.py`, `dist/manifest.json` |
+| `cloudflare` | Beta | `dist/server.py`, `dist/Dockerfile`, `dist/requirements.txt`, `dist/worker.ts`, `dist/wrangler.jsonc`, `dist/package.json`, `dist/manifest.json` |
 
-The `uvicorn`, `lambda`, `cloudrun`, and `docker` targets use the workspace
-build system. It discovers agent files recursively under `agents/` or
-`.agents/`, writes a manifest, and generates a Python server entrypoint.
+The runtime targets use the workspace build system when a PyFlue workspace is
+present. It discovers agent files recursively under `agents/` or `.agents/`,
+writes a manifest, and generates a Python server entrypoint. In an empty
+directory, `docker`, `railway`, `render`, `fly`, `vercel`, `netlify`, and
+`cloudflare` keep the lightweight root-level scaffold fallback.
 
 ## `pyflue dev`
 
@@ -170,6 +172,7 @@ Variables already set in the shell are preserved.
 The server exposes:
 
 ```text
+GET  /openapi.json
 GET  /health
 GET  /agents
 GET  /__pyflue
@@ -177,7 +180,31 @@ GET  /__pyflue/status
 POST /agents/{name}/{agent_id}
 POST /prompt/{agent_id}
 POST /prompt/{agent_id}/events
+GET  /runs/{run_id}
+GET  /runs/{run_id}/events
+GET  /runs/{run_id}/stream
 POST /sessions/{session_id}/abort
+```
+
+Agent route calls support sync JSON by default, SSE run events with
+`Accept: text/event-stream`, and webhook/fire-and-forget mode with
+`X-Webhook: true`. Successful sync, SSE, and webhook responses include
+`X-Flue-Run-Id`.
+
+The main server mounts the read-only admin API at `/admin`. List responses
+include both the existing PyFlue keys (`agents`, `runs`, `instances`) and
+Flue-style pagination keys (`items`, `nextCursor`). List endpoints accept
+`limit` and opaque `cursor` values returned from `nextCursor`; run lists also
+accept `status=active|completed|errored` and `/admin/runs` accepts `agentName`.
+
+OpenAPI documents are available at `/openapi.json` and `/admin/openapi.json`.
+
+Run history is in-memory by default. For durable run/event history across
+process restarts, set:
+
+```bash
+PYFLUE_RUN_STORE=sqlite
+PYFLUE_RUN_STORE_PATH=.pyflue/runs.sqlite3
 ```
 
 Webhook errors return a stable JSON envelope with `error.type`,

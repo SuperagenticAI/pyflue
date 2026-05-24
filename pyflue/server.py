@@ -5,12 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from contextlib import suppress
 from pathlib import Path
 from time import time
 from typing import Any
 
 from starlette.requests import Request
 
+from pyflue.api_schemas import (
+    AbortSessionResponse,
+    AgentListResponse,
+    DevStatusResponse,
+    ErrorEnvelope,
+    HealthResponse,
+    PromptResponse,
+    RunEventListResponse,
+    RunRecordResponse,
+    WebhookAcceptedResponse,
+)
 from pyflue.config import load_config
 from pyflue.errors import (
     MethodNotAllowedError,
@@ -20,13 +32,14 @@ from pyflue.errors import (
     validate_agent_request,
 )
 from pyflue.routing import discover_agent_routes, invoke_route
-from pyflue.runs import get_default_run_store
+from pyflue.runs import generate_run_id, get_default_run_store
 
 
 def create_app(config_path: str | Path = "pyflue.toml") -> Any:
     """Create a FastAPI app with agent webhook routes."""
     try:
         from fastapi import FastAPI
+        from fastapi.encoders import jsonable_encoder
         from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
     except Exception as exc:
         raise ImportError(
@@ -36,9 +49,22 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
     if str(config_path) == "pyflue.toml":
         config_path = os.environ.get("PYFLUE_CONFIG", config_path)
     config = load_config(config_path)
-    resolved_config_path = Path(config_path).expanduser().resolve()
-    app = FastAPI(title="PyFlue Agent Server")
+    resolved_config_path = config.config_path or Path(config_path).expanduser().resolve()
+    error_responses = {
+        400: {"model": ErrorEnvelope},
+        404: {"model": ErrorEnvelope},
+        405: {"model": ErrorEnvelope},
+        415: {"model": ErrorEnvelope},
+        500: {"model": ErrorEnvelope},
+    }
+    app = FastAPI(
+        title="PyFlue Agent Server",
+        description="Public PyFlue agent invocation and run inspection API.",
+    )
     app.state.pyflue_agent = None
+    from pyflue.admin import create_admin_app
+
+    app.mount("/admin", create_admin_app(get_default_run_store()))
 
     @app.exception_handler(PyFlueError)
     async def pyflue_error_handler(_request: Request, exc: PyFlueError) -> JSONResponse:
@@ -62,11 +88,11 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             app.state.pyflue_agent = await init(config_path=config_path)
         return app.state.pyflue_agent
 
-    @app.get("/health")
+    @app.get("/health", response_model=HealthResponse)
     async def health() -> dict[str, Any]:
         return {"ok": True, "framework": "pyflue"}
 
-    @app.get("/__pyflue/status")
+    @app.get("/__pyflue/status", response_model=DevStatusResponse)
     async def status() -> dict[str, Any]:
         routes = discover_agent_routes(config.root, config.agents_dir)
         agent = app.state.pyflue_agent
@@ -92,7 +118,7 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             ],
         }
 
-    @app.get("/agents")
+    @app.get("/agents", response_model=AgentListResponse)
     async def list_agents() -> dict[str, Any]:
         routes = discover_agent_routes(config.root, config.agents_dir)
         return {
@@ -125,10 +151,21 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             "</body></html>"
         )
 
-    @app.api_route("/agents/{name}/{agent_id}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    @app.post(
+        "/agents/{name}/{agent_id}",
+        responses={
+            200: {
+                "description": "Synchronous agent result, or SSE stream when Accept is text/event-stream.",
+                "content": {
+                    "application/json": {"schema": {"type": "object", "additionalProperties": True}},
+                    "text/event-stream": {"schema": {"type": "string"}},
+                },
+            },
+            202: {"model": WebhookAcceptedResponse, "description": "Webhook accepted."},
+            **error_responses,
+        },
+    )
     async def run_agent(name: str, agent_id: str, request: Request) -> Any:
-        if request.method != "POST":
-            raise MethodNotAllowedError(request.method, ["POST"])
         routes = discover_agent_routes(config.root, config.agents_dir)
         validate_agent_request(
             name=name,
@@ -140,14 +177,81 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
         )
         payload = await parse_json_payload(request)
         route = routes[name]
-        return await invoke_route(
+        run_id = generate_run_id()
+        store = get_default_run_store()
+
+        async def invoke() -> Any:
+            return await invoke_route(
+                route,
+                agent_id=agent_id,
+                payload=payload,
+                config_path=config_path,
+                run_store=store,
+                run_id=run_id,
+            )
+
+        if request.headers.get("x-webhook", "").lower() == "true":
+            task = asyncio.create_task(invoke())
+            task.add_done_callback(_consume_background_exception)
+            return JSONResponse(
+                {"status": "accepted", "run_id": run_id, "runId": run_id},
+                status_code=202,
+                headers={"X-Flue-Run-Id": run_id},
+            )
+
+        accept = request.headers.get("accept", "")
+        if "text/event-stream" in accept.lower():
+            async def events() -> Any:
+                task = asyncio.create_task(invoke())
+                try:
+                    async for event in store.subscribe(run_id, after=0):
+                        payload = event.to_dict()
+                        yield (
+                            f"id: {event.event_index}\n"
+                            f"event: {event.type}\n"
+                            f"data: {json.dumps(payload)}\n\n"
+                        )
+                        if event.type == "run_end":
+                            break
+                    await task
+                except Exception as exc:
+                    error = PyFlueError(
+                        type="internal_error",
+                        message="An internal error occurred.",
+                        details="The server encountered an unexpected error while streaming this request.",
+                        dev=str(exc),
+                        status=500,
+                    )
+                    yield f"event: error\ndata: {json.dumps(error_envelope(error, dev=True))}\n\n"
+
+            return StreamingResponse(
+                events(),
+                media_type="text/event-stream",
+                headers={"X-Flue-Run-Id": run_id},
+            )
+
+        result = await invoke_route(
             route,
             agent_id=agent_id,
             payload=payload,
             config_path=config_path,
+            run_store=store,
+            run_id=run_id,
+        )
+        return JSONResponse(
+            jsonable_encoder(result),
+            headers={"X-Flue-Run-Id": run_id},
         )
 
-    @app.post("/prompt/{agent_id}")
+    @app.api_route(
+        "/agents/{name}/{agent_id}",
+        methods=["GET", "PUT", "PATCH", "DELETE"],
+        include_in_schema=False,
+    )
+    async def reject_agent_method(name: str, agent_id: str, request: Request) -> Any:
+        raise MethodNotAllowedError(request.method, ["POST"])
+
+    @app.post("/prompt/{agent_id}", response_model=PromptResponse, responses=error_responses)
     async def prompt(agent_id: str, request: Request) -> dict[str, Any]:
         payload = await parse_json_payload(request)
         prompt_text = str(payload.get("prompt", ""))
@@ -174,7 +278,16 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             "model": {"id": result.model.id},
         }
 
-    @app.post("/prompt/{agent_id}/events")
+    @app.post(
+        "/prompt/{agent_id}/events",
+        responses={
+            200: {
+                "description": "Prompt event stream.",
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            },
+            **error_responses,
+        },
+    )
     async def prompt_events(agent_id: str, request: Request) -> Any:
         payload = await parse_json_payload(request)
 
@@ -199,7 +312,7 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
 
         return StreamingResponse(events(), media_type="text/event-stream")
 
-    @app.get("/runs/{run_id}")
+    @app.get("/runs/{run_id}", response_model=RunRecordResponse, responses=error_responses)
     async def get_run(run_id: str) -> dict[str, Any]:
         store = get_default_run_store()
         run = store.get_run(run_id)
@@ -212,7 +325,11 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             )
         return run.to_dict()
 
-    @app.get("/runs/{run_id}/events")
+    @app.get(
+        "/runs/{run_id}/events",
+        response_model=RunEventListResponse,
+        responses=error_responses,
+    )
     async def get_run_events(run_id: str, request: Request) -> dict[str, Any]:
         store = get_default_run_store()
         if store.get_run(run_id) is None:
@@ -226,11 +343,22 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
         events = store.get_events(run_id, after=after, limit=limit, types=types)
         return {
             "run_id": run_id,
+            "runId": run_id,
             "events": [event.to_dict() for event in events],
             "next_after": events[-1].event_index if events else after,
+            "nextAfter": events[-1].event_index if events else after,
         }
 
-    @app.get("/runs/{run_id}/stream")
+    @app.get(
+        "/runs/{run_id}/stream",
+        responses={
+            200: {
+                "description": "Run event stream.",
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            },
+            **error_responses,
+        },
+    )
     async def stream_run(run_id: str, request: Request) -> Any:
         store = get_default_run_store()
         if store.get_run(run_id) is None:
@@ -287,7 +415,11 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
 
         return StreamingResponse(events(), media_type="text/event-stream")
 
-    @app.post("/sessions/{session_id}/abort")
+    @app.post(
+        "/sessions/{session_id}/abort",
+        response_model=AbortSessionResponse,
+        responses=error_responses,
+    )
     async def abort_session(session_id: str) -> dict[str, Any]:
         agent = await get_agent()
         session = await agent.session(session_id)
@@ -341,6 +473,11 @@ def _parse_event_query(query: Any) -> tuple[int, int, list[str] | None]:
             raise _bad("types", str(raw_types), "Must be a comma-separated list of event types.")
 
     return after, limit, types
+
+
+def _consume_background_exception(task: asyncio.Task[Any]) -> None:
+    with suppress(Exception):
+        task.result()
 
 
 def _mtime(path: Path) -> float | None:

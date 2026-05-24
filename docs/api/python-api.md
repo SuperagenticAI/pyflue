@@ -71,6 +71,10 @@ Parameters:
 session = await agent.session("issue-123")
 ```
 
+`config_path` can point to `pyflue.toml` or `pyflue.config.py`. When
+`pyflue.toml` is absent, `load_config()` and `init()` fall back to
+`pyflue.config.py`.
+
 If no session id is supplied, PyFlue uses `default`.
 
 ### `sessions`
@@ -262,6 +266,35 @@ await session.prompt("Use lookup_package if useful", tools=[lookup_package])
 
 Custom tools cannot reuse built-in names.
 
+For Flue-style tool definitions, use `ToolDef` or `define_tool`. `execute`
+receives the model-provided arguments as one dictionary:
+
+```python
+from pyflue import ToolDef, create_tools, define_tool
+
+async def lookup_issue(args: dict[str, str]) -> str:
+    return f"Issue {args['number']}"
+
+issue_tool = ToolDef(
+    name="lookup_issue",
+    description="Look up an issue by number.",
+    parameters={
+        "type": "object",
+        "properties": {"number": {"type": "string"}},
+        "required": ["number"],
+    },
+    execute=lookup_issue,
+)
+
+agent = await init(tools=[issue_tool])
+
+# Helpers are available when you want callable tools explicitly.
+tools = create_tools([
+    define_tool("lookup_issue", lookup_issue, parameters=issue_tool.parameters)
+])
+await session.prompt("Use lookup_issue if useful", tools=tools)
+```
+
 Agent-wide tools are passed to `init` and are available to every prompt, skill,
 and task:
 
@@ -398,6 +431,21 @@ data = await session.read_bytes("image.png")
 await session.write_bytes("copy.png", data)
 ```
 
+For parity with Flue's out-of-band filesystem surface, agents and sessions also
+expose `fs`:
+
+```python
+await session.fs.write_file("report.txt", "Summary")
+content = await session.fs.read_file("report.txt")
+entries = await session.fs.readdir(".")
+
+await agent.fs.writeFile("shared.txt", "available in the default session")
+```
+
+`fs` methods do not add messages to the conversation transcript. The Pythonic
+snake_case methods have Flue-compatible camelCase aliases such as `readFile`,
+`readFileBuffer`, and `writeFile`.
+
 ## Shell Helper
 
 ```python
@@ -466,6 +514,21 @@ async with PyFlueClient("http://127.0.0.1:2024") as client:
     print(result.text)
 ```
 
+For Flue SDK-style code, use the factory alias:
+
+```python
+from pyflue import create_flue_client
+
+async with create_flue_client(baseUrl="http://127.0.0.1:2024") as client:
+    run = await client.agents.invoke("triage", "issue-123", {"mode": "webhook"})
+```
+
+`create_flue_client()` defaults agent invocation results to Flue SDK-style
+shapes: sync calls return `{"result": ..., "runId": ...}` and webhook calls
+return `{"runId": ...}`. `PyFlueClient` keeps raw PyFlue responses by default.
+Pass `agentResponseFormat="raw"` to the factory, or `{"responseFormat": "raw"}`
+to one `agents.invoke()` call, to keep the raw response.
+
 Typed prompt results use the same Pydantic extraction behavior as local
 sessions:
 
@@ -478,4 +541,76 @@ typed = await client.prompt(
 ```
 
 The client also supports `health()`, `agents()`, file-based `agent(...)`
-routes, and `stream(...)`.
+routes, and `stream(...)`. For Flue-style route invocation, use the agent and
+run namespaces:
+
+```python
+result = await client.agents.invoke("triage", "issue-123", payload={"prompt": "Review"})
+accepted = await client.agents.invoke("triage", "issue-123", mode="webhook")
+
+async for event in client.agents.stream("triage", "issue-123", payload={"prompt": "Review"}):
+    print(event.type, event.data)
+
+# Flue SDK-style options dictionaries are also accepted.
+result = await client.agents.invoke(
+    "triage",
+    "issue-123",
+    {"mode": "sync", "payload": {"prompt": "Review"}},
+)
+
+async for event in client.agents.invoke(
+    "triage",
+    "issue-123",
+    {"mode": "stream", "payload": {"prompt": "Review"}},
+):
+    print(event.type, event.data)
+
+run = await client.runs.get(accepted["run_id"])
+events = await client.runs.events(accepted["run_id"], types=["log", "run_end"])
+```
+
+Admin endpoints mounted at `/admin` are available through `client.admin`:
+
+```python
+agents = await client.admin.agents.list()
+runs = await client.admin.runs.list(limit=20, status="errored")
+next_page = await client.admin.runs.list(limit=20, cursor=runs["nextCursor"])
+run = await client.admin.runs.get("run_...")
+```
+
+Treat `nextCursor` as an opaque token. Agent route responses also expose the
+same run id in the `X-Flue-Run-Id` header for Flue SDK compatibility.
+
+Run and event payloads include both Pythonic snake_case fields (`run_id`,
+`event_index`, `started_at`) and Flue-style camelCase fields (`runId`,
+`eventIndex`, `startedAt`) for compatibility.
+
+For durable run/event history in a server process, use the SQLite run store:
+
+```python
+from pyflue import SQLiteRunRegistry, SQLiteRunStore
+
+store = SQLiteRunStore(".pyflue/runs.sqlite3")
+```
+
+The default server store can also be selected with
+`PYFLUE_RUN_STORE=sqlite` and `PYFLUE_RUN_STORE_PATH=.pyflue/runs.sqlite3`.
+
+For deployment-wide run pointers, use the Flue-style run registry:
+
+```python
+registry = SQLiteRunRegistry(".pyflue/run-registry.sqlite3")
+await registry.recordRunStart(
+    run_id="run_...",
+    agent_name="triage",
+    instance_id="issue-123",
+)
+await registry.recordRunEnd(run_id="run_...", is_error=False)
+
+page = await registry.listRuns(limit=20)
+next_page = await registry.listRuns(cursor=page["nextCursor"])
+```
+
+The FastAPI apps expose OpenAPI documents at `/openapi.json` and
+`/admin/openapi.json`, including schemas for run records, event lists, admin
+list responses, and error envelopes.

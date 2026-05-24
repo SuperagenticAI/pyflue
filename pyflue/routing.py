@@ -68,7 +68,7 @@ class PyFlueContext:
     async def init(self, **kwargs: Any) -> Any:
         """Initialize a PyFlue agent with route config defaults."""
         if self.config is not None:
-            kwargs.setdefault("config_path", self.config.root / "pyflue.toml")
+            kwargs.setdefault("config_path", self.config.config_path or self.config.root / "pyflue.toml")
         return await init(env=self.env, **kwargs)
 
 
@@ -155,6 +155,7 @@ async def invoke_route(
     if isinstance(result, dict):
         meta = dict(result.get("_meta") or {})
         meta.setdefault("run_id", run.run_id)
+        meta.setdefault("runId", run.run_id)
         out = dict(result)
         out["_meta"] = meta
         return out

@@ -122,6 +122,7 @@ class CompactionConfig:
     context_window_tokens: int = 128000
     reserve_tokens: int = 16384
     keep_recent_tokens: int = 20000
+    model: str | None = None
 
 
 @dataclass
@@ -218,6 +219,11 @@ class ToolDef:
     description: str
     parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
     execute: Callable[[dict[str, Any]], Any] | None = None
+
+
+# Reference parity: v0.8.0 renamed ``ToolDef`` to ``ToolDefinition``. ``ToolDef``
+# remains the back-compatible alias.
+ToolDefinition = ToolDef
 
 
 def define_command(

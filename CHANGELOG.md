@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.0
+
+This release adopts the TypeScript Flue v0.8 architecture: the **Agents vs
+Workflows** split, plus observability and host-sandbox parity.
+
+### New features
+
+- **Composable agents.** `create_agent(initialize)` defines a deferred,
+  addressable agent; `define_agent_profile()` defines reusable behaviour.
+  `init_agent()` resolves a created agent; `init()` is unchanged and compatible.
+- **Workflows.** Modules in `workflows/` (or `.pyflue/workflows/`) export
+  `run(ctx)`; each invocation is a workflow run with a `workflow:<name>:<ulid>`
+  id. `FlueContext` (formerly `PyFlueContext`, aliased) gains `ctx.id`, `ctx.req`,
+  and `ctx.init(agent)`. `pyflue run <workflow>` runs one locally; `POST
+  /workflows/{name}` supports accepted / `?wait=result` / SSE modes.
+- **Persistent agent instances.** A module that default-exports a created agent
+  is served at `POST /agents/{name}/{id}` with session continuity (no run id);
+  `AgentInstanceManager` caches instances. New pluggable `SessionStore` /
+  `InMemorySessionStore` / `SQLiteSessionStore`.
+- **`dispatch()`.** Accepts JSON-serialisable input for asynchronous agent
+  processing and returns a `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`.
+- **Operation events.** Every session operation emits `operation_start` /
+  `operation` with `operation_id` / `instance_id` correlation.
+- **OpenTelemetry.** `pyflue.observability.create_opentelemetry_observer()`
+  maps events to a workflow → operation → tool/task/compaction span tree
+  (`pyflue[otel]` extra).
+- **Host `local()` sandbox.** Real filesystem + subprocess shell with an opt-in
+  env allowlist; `init(sandbox=...)` accepts a factory callable.
+- **Subagent profiles.** `task(agent="name")` selects a declared profile
+  (instructions/model/reasoning/tools); `profile_to_role()` / `role_to_profile()`
+  bridge Markdown roles.
+- **WebSocket surfaces.** Persistent agent (multi-prompt) and workflow (one run)
+  WebSocket endpoints; client `agents.connect()` / `workflows.connect()` /
+  `workflows.invoke()` / `workflows.stream()`.
+- **`ToolDefinition`** is now the canonical name for `ToolDef` (aliased).
+- Added a chat integration example under `examples/chat/`.
+
+### Breaking changes
+
+- **Runs are workflow-only.** Direct/dispatched agent prompts no longer create
+  workflow runs or surface `X-Flue-Run-Id`; they correlate by instance and
+  operation. File-based `default(context)` handlers remain workflow-like and
+  keep their runs.
+
 ## 0.1.5
 
 - Added Flue-style HTTP run/admin parity: SSE/webhook agent routes, run event APIs, admin OpenAPI schemas, opaque admin cursors, and `X-Flue-Run-Id` headers.

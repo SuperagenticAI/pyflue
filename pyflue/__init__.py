@@ -1,10 +1,32 @@
 """PyFlue public API."""
 
-__version__ = "0.1.5"
+__version__ = "0.2.0"
 
+from pyflue.agents import (
+    AgentCreateContext,
+    AgentProfile,
+    AgentRuntimeConfig,
+    CreatedAgent,
+    create_agent,
+    createAgent,
+    define_agent_profile,
+    defineAgentProfile,
+    extend_agent_profile,
+    init_agent,
+    is_created_agent,
+    profile_to_role,
+    resolve_agent_profile,
+    role_to_profile,
+)
 from pyflue.client import PyFlueClient, create_flue_client, createFlueClient
 from pyflue.config import define_config
 from pyflue.core import PyFlueAgent, PyFlueFs, PyFlueSession, PyFlueSessions, init
+from pyflue.dispatch import (
+    DispatchQueue,
+    DispatchReceipt,
+    dispatch,
+    get_default_dispatch_queue,
+)
 from pyflue.harnesses.registry import register_harness
 from pyflue.mcp import (
     MCPClient,
@@ -13,7 +35,15 @@ from pyflue.mcp import (
     connect_mcp_server,
     connect_mcp_server_stdio,
 )
-from pyflue.routing import AgentRoute, PyFlueContext, discover_agent_routes
+from pyflue.observability import create_opentelemetry_observer
+from pyflue.routing import (
+    AgentInstanceManager,
+    AgentRoute,
+    FlueContext,
+    PyFlueContext,
+    discover_agent_routes,
+    load_agent_default,
+)
 from pyflue.runs import (
     FlueRun,
     InMemoryRunRegistry,
@@ -32,7 +62,14 @@ from pyflue.runs import (
     observe,
     unobserve,
 )
+from pyflue.sandboxes import local
 from pyflue.search import BM25Search, SemanticSearch
+from pyflue.session_store import (
+    InMemorySessionStore,
+    SessionData,
+    SessionStore,
+    SQLiteSessionStore,
+)
 from pyflue.skills import Role, Skill, load_roles, load_skills
 from pyflue.tools import create_tools, createTools, define_tool
 from pyflue.types import (
@@ -57,11 +94,27 @@ from pyflue.types import (
     PyFlueEventCallback,
     ThinkingLevel,
     ToolDef,
+    ToolDefinition,
     define_command,
 )
+from pyflue.workflows import WorkflowDef, discover_workflows, invoke_workflow
 
 __all__ = [
+    "AgentCreateContext",
     "AgentInfo",
+    "AgentProfile",
+    "AgentRuntimeConfig",
+    "CreatedAgent",
+    "create_agent",
+    "createAgent",
+    "define_agent_profile",
+    "defineAgentProfile",
+    "extend_agent_profile",
+    "init_agent",
+    "is_created_agent",
+    "profile_to_role",
+    "resolve_agent_profile",
+    "role_to_profile",
     "BuildContext",
     "BuildOptions",
     "BuildPlugin",
@@ -76,7 +129,21 @@ __all__ = [
     "createFlueClient",
     "create_flue_client",
     "PyFlueCommand",
+    "FlueContext",
     "PyFlueContext",
+    "WorkflowDef",
+    "discover_workflows",
+    "invoke_workflow",
+    "AgentInstanceManager",
+    "load_agent_default",
+    "DispatchQueue",
+    "DispatchReceipt",
+    "dispatch",
+    "get_default_dispatch_queue",
+    "InMemorySessionStore",
+    "SQLiteSessionStore",
+    "SessionData",
+    "SessionStore",
     "PyFlueEvent",
     "PyFlueEventCallback",
     "PyFlueFs",
@@ -100,6 +167,8 @@ __all__ = [
     "observe",
     "unobserve",
     "BM25Search",
+    "local",
+    "create_opentelemetry_observer",
     "CompactionConfig",
     "ProviderSettings",
     "ProvidersConfig",
@@ -114,6 +183,7 @@ __all__ = [
     "Skill",
     "ThinkingLevel",
     "ToolDef",
+    "ToolDefinition",
     "connect_mcp_server",
     "connect_mcp_server_stdio",
     "createTools",

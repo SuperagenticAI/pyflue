@@ -562,8 +562,38 @@ async def test_session_prompt_emits_flue_lifecycle_events(tmp_path):
 
     await (await agent.session("s1")).prompt("hello")
 
-    assert [event.type for event in events] == ["agent_start", "turn_end", "idle"]
+    assert [event.type for event in events] == [
+        "operation_start",
+        "agent_start",
+        "turn_end",
+        "idle",
+        "operation",
+    ]
     assert events[0].data["session_id"] == "s1"
+    assert events[0].data["operation_kind"] == "prompt"
+
+
+@pytest.mark.asyncio
+async def test_operation_events_carry_operation_id_and_instance_id(tmp_path):
+    events = []
+    config = PyFlueConfig(root=tmp_path, harness="deepagents")
+    agent = PyFlueAgent(config=config, on_event=events.append)
+    agent.instance_id = "inst-7"  # set by init_agent for persistent agents
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    await (await agent.session("s1")).prompt("hello")
+
+    starts = [e for e in events if e.type == "operation_start"]
+    ends = [e for e in events if e.type == "operation"]
+    assert len(starts) == 1 and len(ends) == 1
+    op_id = starts[0].data["operation_id"]
+    assert op_id and op_id.startswith("op_")
+    assert ends[0].data["operation_id"] == op_id
+    assert ends[0].data["is_error"] is False
+    assert ends[0].data["operation_kind"] == "prompt"
+    # Correlation fields ride on every event in the operation.
+    assert all(e.data.get("operation_id") == op_id for e in events)
+    assert all(e.data.get("instance_id") == "inst-7" for e in events)
 
 
 @pytest.mark.asyncio
@@ -576,12 +606,14 @@ async def test_session_stream_emits_text_delta_callback(tmp_path):
     _ = [event async for event in (await agent.session("s1")).stream("hello")]
 
     assert [event.type for event in events] == [
+        "operation_start",
         "agent_start",
         "text_delta",
         "turn_end",
         "idle",
+        "operation",
     ]
-    assert events[1].data["text"] == "streamed text"
+    assert events[2].data["text"] == "streamed text"
 
 
 @pytest.mark.asyncio
@@ -615,10 +647,16 @@ async def test_session_shell_emits_command_events(tmp_path):
 
     await (await agent.session("s1")).shell("printf hi")
 
-    assert [event.type for event in events] == ["command_start", "command_end", "idle"]
-    assert events[0].data["command"] == "printf"
-    assert events[0].data["args"] == ["hi"]
-    assert events[1].data["exitCode"] == 0
+    assert [event.type for event in events] == [
+        "operation_start",
+        "command_start",
+        "command_end",
+        "idle",
+        "operation",
+    ]
+    assert events[1].data["command"] == "printf"
+    assert events[1].data["args"] == ["hi"]
+    assert events[2].data["exitCode"] == 0
 
 
 @pytest.mark.asyncio

@@ -14,14 +14,21 @@ from pyflue.sandboxes.virtual import VirtualSandbox
 
 
 def create_sandbox(
-    name: str,
+    name: Any,
     *,
     root: str | Path | None = None,
     policy: SandboxPolicy | None = None,
     env: dict[str, str] | None = None,
     config: dict[str, Any] | None = None,
 ) -> SandboxBackend:
-    """Create a sandbox provider by name."""
+    """Create a sandbox provider by name, or from a factory callable.
+
+    ``name`` may be a provider string, or a factory callable such as the one
+    returned by :func:`pyflue.sandboxes.local`, which builds a host-bound
+    sandbox with explicit env exposure.
+    """
+    if callable(name):
+        return name(root=root, policy=policy, env=env, config=config)
     env = env or {}
     config = config or {}
     normalized = name.replace("_", "-").lower()

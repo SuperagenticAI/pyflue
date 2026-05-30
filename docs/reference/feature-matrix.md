@@ -2,6 +2,26 @@
 
 This page shows what users can rely on today and what is planned next.
 
+## Agents & Workflows (v0.2.0)
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| `create_agent()` + profiles | Implemented | Composable agents; `define_agent_profile()`, `init_agent()`. |
+| Workflows | Implemented | `workflows/**/run(ctx)`, `pyflue run <wf>`, `POST /workflows/{name}` (accepted / `?wait=result` / SSE). |
+| `FlueContext` | Implemented | `ctx.id`, `ctx.payload`, `ctx.env`, `ctx.req`, `ctx.log`, `ctx.init(agent)`. (`PyFlueContext` aliased.) |
+| Persistent agent instances | Implemented | `create_agent` default-export served at `POST /agents/{name}/{id}` with session continuity; no run id. |
+| Session stores | Implemented | `SessionStore` protocol + `InMemorySessionStore` + `SQLiteSessionStore`. |
+| `dispatch()` | Implemented | Async agent input + `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`. Process-memory admission. |
+| Operation events | Implemented | `operation_start`/`operation` with `operation_id`/`instance_id`. |
+| OpenTelemetry | Implemented | `create_opentelemetry_observer()` (`pyflue[otel]`); per-turn LLM spans are a follow-up. |
+| Host `local()` sandbox | Implemented | Real fs + subprocess shell, opt-in env allowlist. |
+| Subagent profiles | Implemented | `task(agent="name")` selection; `profile_to_role()`/`role_to_profile()` bridge. |
+| WebSocket | Implemented | Agent (multi-prompt) + workflow (one run); client `agents.connect`/`workflows.connect`. |
+| `ToolDefinition` | Implemented | Canonical name for `ToolDef` (aliased). |
+| Durable execution | Planned | Cloudflare-style run recovery does not map to Python yet. |
+
+## Core
+
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Python package | Implemented | `pyflue` package with console script. |

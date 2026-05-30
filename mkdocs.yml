@@ -50,6 +50,7 @@ nav:
   - Getting Started: getting-started.md
   - Deployment: deployment.md
   - Core Concepts:
+      - Agents vs Workflows: concepts/agents-vs-workflows.md
       - Agent Harness: concepts/harness.md
       - Skills: concepts/skills.md
       - Roles And Routing: concepts/roles-and-routing.md

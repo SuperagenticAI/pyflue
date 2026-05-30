@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -38,8 +39,18 @@ class PyFlueClient:
         self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owns_client = client is None
         self.agents = _AgentsClient(self)
+        self.workflows = _WorkflowsClient(self)
         self.runs = _RunsClient(self)
         self.admin = _AdminClient(self)
+
+    def _ws_url(self, path: str) -> str:
+        """Convert the configured base URL to a ws:// or wss:// URL for ``path``."""
+        base = self.base_url
+        if base.startswith("https://"):
+            return "wss://" + base[len("https://") :] + path
+        if base.startswith("http://"):
+            return "ws://" + base[len("http://") :] + path
+        return base + path
 
     async def close(self) -> None:
         """Close the underlying HTTP client when PyFlue created it."""
@@ -176,6 +187,19 @@ class _AgentsClient:
         response.raise_for_status()
         return list(response.json().get("agents", []))
 
+    @contextlib.asynccontextmanager
+    async def connect(self, name: str, agent_id: str) -> AsyncIterator[_AgentConnection]:
+        """Open a persistent WebSocket to an agent instance for multiple prompts.
+
+            async with client.agents.connect("assistant", "inst-1") as conn:
+                reply = await conn.prompt("hello")
+        """
+        import websockets
+
+        url = self._root._ws_url(f"/agents/{name}/{agent_id}")
+        async with websockets.connect(url) as socket:
+            yield _AgentConnection(socket)
+
     def invoke(
         self,
         name: str,
@@ -256,6 +280,89 @@ class _AgentsClient:
             response.raise_for_status()
             async for event in _iter_sse_events(response):
                 yield event
+
+
+class _WorkflowsClient:
+    """Workflow client namespace: HTTP invocation/streaming and WebSocket runs."""
+
+    def __init__(self, root: PyFlueClient):
+        self._root = root
+
+    async def invoke(
+        self,
+        name: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        wait: bool = False,
+    ) -> dict[str, Any]:
+        """Start a workflow.
+
+        Returns a ``{status, run_id}`` receipt, or the completed
+        ``{status, run_id, result}`` envelope when ``wait=True``.
+        """
+        params = {"wait": "result"} if wait else None
+        response = await self._root._client.post(
+            f"{self._root.base_url}/workflows/{name}",
+            json={"payload": payload or {}},
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def stream(
+        self, name: str, payload: dict[str, Any] | None = None
+    ) -> AsyncIterator[PyFlueEvent]:
+        """Start a workflow and stream its run events over SSE."""
+        async with self._root._client.stream(
+            "POST",
+            f"{self._root.base_url}/workflows/{name}",
+            json={"payload": payload or {}},
+            headers={"accept": "text/event-stream"},
+        ) as response:
+            response.raise_for_status()
+            async for event in _iter_sse_events(response):
+                yield event
+
+    @contextlib.asynccontextmanager
+    async def connect(self, name: str) -> AsyncIterator[_WorkflowConnection]:
+        """Open a WebSocket to run one workflow and read its events + result."""
+        import websockets
+
+        url = self._root._ws_url(f"/workflows/{name}")
+        async with websockets.connect(url) as socket:
+            yield _WorkflowConnection(socket)
+
+
+class _AgentConnection:
+    """A live WebSocket connection to a persistent agent instance."""
+
+    def __init__(self, socket: Any):
+        self._socket = socket
+
+    async def prompt(self, message: str, *, session: str = "default") -> dict[str, Any]:
+        """Send one prompt and return the agent's result message."""
+        await self._socket.send(
+            json.dumps({"type": "prompt", "message": message, "session": session})
+        )
+        return json.loads(await self._socket.recv())
+
+
+class _WorkflowConnection:
+    """A live WebSocket connection to one workflow invocation."""
+
+    def __init__(self, socket: Any):
+        self._socket = socket
+
+    async def run(self, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Send the payload and collect messages through the terminal result/error."""
+        await self._socket.send(json.dumps({"payload": payload or {}}))
+        messages: list[dict[str, Any]] = []
+        while True:
+            message = json.loads(await self._socket.recv())
+            messages.append(message)
+            if message.get("type") in ("result", "error"):
+                break
+        return messages
 
 
 class _RunsClient:

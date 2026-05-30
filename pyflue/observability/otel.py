@@ -1,9 +1,9 @@
 """OpenTelemetry tracing adapter (parity item 6).
 
 ``create_opentelemetry_observer()`` returns a callback that maps PyFlue's event
-stream onto OpenTelemetry spans — the Python counterpart of the reference's
+stream onto OpenTelemetry spans. It is the Python counterpart of the reference's
 ``@flue/opentelemetry`` ``createOpenTelemetryObserver``. Like the reference, it
-is a pure event→span mapper; you wire it into the event stream yourself:
+is a pure event-to-span mapper; you wire it into the event stream yourself:
 
     from pyflue import init
     from pyflue.observability import create_opentelemetry_observer
@@ -58,6 +58,7 @@ def create_opentelemetry_observer(
     tools: dict[Any, Any] = {}
     tasks: dict[str, Any] = {}
     compactions: dict[str, Any] = {}
+    turns: dict[str, Any] = {}
 
     def _data(event: Any) -> dict[str, Any]:
         return getattr(event, "data", {}) or {}
@@ -73,8 +74,23 @@ def create_opentelemetry_observer(
             "flue.operation_id": data.get("operation_id"),
             "flue.session": data.get("session_id"),
             "flue.task_id": data.get("taskId"),
+            "flue.turn_id": data.get("turn_id"),
         }
         return {key: value for key, value in candidates.items() if value is not None}
+
+    def _usage_attributes(usage: dict[str, Any]) -> dict[str, Any]:
+        mapping = {
+            "input": "gen_ai.usage.input_tokens",
+            "output": "gen_ai.usage.output_tokens",
+            "total_tokens": "gen_ai.usage.total_tokens",
+            "cache_read": "gen_ai.usage.cache_read_tokens",
+            "cache_write": "gen_ai.usage.cache_write_tokens",
+        }
+        attributes = {attr: usage[key] for key, attr in mapping.items() if usage.get(key) is not None}
+        cost = usage.get("cost") or {}
+        if cost.get("total") is not None:
+            attributes["gen_ai.usage.cost_total"] = cost["total"]
+        return attributes
 
     def _start(name: str, parent: Any | None, attributes: dict[str, Any]) -> Any:
         context = trace.set_span_in_context(parent) if parent is not None else None
@@ -125,6 +141,28 @@ def create_opentelemetry_observer(
             span = operations.pop(data.get("operation_id"), None)
             if span is not None:
                 _finish(span, is_error=bool(data.get("is_error")), duration_ms=data.get("duration_ms"))
+        elif event_type == "turn_request":
+            turn_id = data.get("turn_id")
+            if turn_id is None:
+                return
+            parent = operations.get(data.get("operation_id")) or _operation_parent(event)
+            attributes = {
+                **_identifiers(event),
+                "gen_ai.operation.name": "chat",
+                "flue.turn.purpose": data.get("purpose", "agent"),
+            }
+            if data.get("model"):
+                attributes["gen_ai.request.model"] = data["model"]
+            turns[turn_id] = _start("gen_ai.generate", parent, attributes)
+        elif event_type == "turn":
+            span = turns.pop(data.get("turn_id"), None)
+            if span is not None:
+                if data.get("model"):
+                    span.set_attribute("gen_ai.response.model", data["model"])
+                usage = data.get("usage") or {}
+                if usage:
+                    span.set_attributes(_usage_attributes(usage))
+                _finish(span, is_error=bool(data.get("is_error")), error=data.get("error"))
         elif event_type == "command_start":
             parent = operations.get(data.get("operation_id"))
             attributes = {**_identifiers(event), "flue.tool.name": "bash"}

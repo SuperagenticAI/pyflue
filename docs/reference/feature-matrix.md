@@ -13,12 +13,15 @@ This page shows what users can rely on today and what is planned next.
 | Session stores | Implemented | `SessionStore` protocol + `InMemorySessionStore` + `SQLiteSessionStore`. |
 | `dispatch()` | Implemented | Async agent input + `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`. Process-memory admission. |
 | Operation events | Implemented | `operation_start`/`operation` with `operation_id`/`instance_id`. |
-| OpenTelemetry | Implemented | `create_opentelemetry_observer()` (`pyflue[otel]`); per-turn LLM spans are a follow-up. |
+| Generation telemetry | Implemented | `turn_request`/`turn` events carry model and token usage; mapped to `gen_ai.*` spans. |
+| OpenTelemetry | Implemented | `create_opentelemetry_observer()` (`pyflue[otel]`); workflow, operation, generation, tool, task, and compaction spans. |
 | Host `local()` sandbox | Implemented | Real fs + subprocess shell, opt-in env allowlist. |
 | Subagent profiles | Implemented | `task(agent="name")` selection; `profile_to_role()`/`role_to_profile()` bridge. |
+| Packaged skills | Implemented | `load_skill(path)` imports a `SKILL.md` as a reusable `Skill`. |
 | WebSocket | Implemented | Agent (multi-prompt) + workflow (one run); client `agents.connect`/`workflows.connect`. |
 | `ToolDefinition` | Implemented | Canonical name for `ToolDef` (aliased). |
-| Durable execution | Planned | Cloudflare-style run recovery does not map to Python yet. |
+| Source layouts | Implemented | Discovers `src/agents` and `src/workflows` plus legacy root/`.agents`/`.pyflue`. |
+| Durable execution | Not ported | Cloudflare-specific run recovery. See [Parity with Flue](flue-parity.md). |
 
 ## Core
 

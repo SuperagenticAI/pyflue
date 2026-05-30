@@ -1,7 +1,7 @@
 """Pluggable session stores (parity with the Flue Data Persistence API).
 
-A :class:`SessionStore` persists a session's conversation state — the
-serialized history produced by :meth:`SessionHistory.to_data` — keyed by a
+A :class:`SessionStore` persists a session's conversation state, the
+serialized history produced by :meth:`SessionHistory.to_data`, keyed by a
 session identity. The reference exposes this so applications can choose where
 agent conversation state lives.
 

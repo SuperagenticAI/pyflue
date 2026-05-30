@@ -70,7 +70,7 @@ from pyflue.session_store import (
     SessionStore,
     SQLiteSessionStore,
 )
-from pyflue.skills import Role, Skill, load_roles, load_skills
+from pyflue.skills import Role, Skill, load_roles, load_skill, load_skills
 from pyflue.tools import create_tools, createTools, define_tool
 from pyflue.types import (
     AgentInfo,
@@ -194,6 +194,7 @@ __all__ = [
     "define_tool",
     "init",
     "load_roles",
+    "load_skill",
     "load_skills",
     "register_harness",
 ]

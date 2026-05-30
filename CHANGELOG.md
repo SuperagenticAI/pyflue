@@ -23,9 +23,12 @@ Workflows** split, plus observability and host-sandbox parity.
   processing and returns a `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`.
 - **Operation events.** Every session operation emits `operation_start` /
   `operation` with `operation_id` / `instance_id` correlation.
-- **OpenTelemetry.** `pyflue.observability.create_opentelemetry_observer()`
-  maps events to a workflow → operation → tool/task/compaction span tree
-  (`pyflue[otel]` extra).
+- **Observability.** Every model generation emits `turn_request` / `turn`
+  events carrying the model and token usage.
+  `pyflue.observability.create_opentelemetry_observer()` maps the event stream
+  (workflow runs, operations, generations, tools, tasks, and compaction) to
+  OpenTelemetry spans, including `gen_ai.*` usage attributes (`pyflue[otel]`
+  extra).
 - **Host `local()` sandbox.** Real filesystem + subprocess shell with an opt-in
   env allowlist; `init(sandbox=...)` accepts a factory callable.
 - **Subagent profiles.** `task(agent="name")` selects a declared profile
@@ -35,7 +38,14 @@ Workflows** split, plus observability and host-sandbox parity.
   WebSocket endpoints; client `agents.connect()` / `workflows.connect()` /
   `workflows.invoke()` / `workflows.stream()`.
 - **`ToolDefinition`** is now the canonical name for `ToolDef` (aliased).
+- **Packaged skills.** `load_skill(path)` imports a `SKILL.md` as a reusable
+  `Skill` for `create_agent(skills=[...])` and session calls.
+- **Source layouts.** Agents and workflows are discovered from `src/agents`
+  and `src/workflows`, in addition to the legacy root and `.agents` / `.pyflue`
+  locations. `pyflue init` scaffolds the `src/` layout.
 - Added a chat integration example under `examples/chat/`.
+- Added a [Parity with Flue](docs/reference/flue-parity.md) reference page
+  recording what is implemented and what is intentionally not ported.
 
 ### Breaking changes
 

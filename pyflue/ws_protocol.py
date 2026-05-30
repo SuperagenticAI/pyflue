@@ -2,10 +2,10 @@
 
 Two connection shapes mirror the TypeScript Flue reference:
 
-* **Agent WebSocket** — persistent. The client sends prompt messages over one
+* **Agent WebSocket** is persistent. The client sends prompt messages over one
   connection and receives a result per prompt; the socket stays open for the
   continuing instance/session.
-* **Workflow WebSocket** — finite. The client sends one invocation payload; the
+* **Workflow WebSocket** is finite. The client sends one invocation payload; the
   server streams the run's events and a final result, then closes.
 
 The wire format is JSON objects. These dataclasses document and (on the client)

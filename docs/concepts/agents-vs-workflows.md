@@ -10,7 +10,7 @@ is involved.
 | Shape | Persistent, addressable instance | Finite, one bounded execution |
 | Identity | `instance_id` + session | `run_id` (`workflow:<name>:<ulid>`) |
 | Surfaces | `POST /agents/<name>/<id>`, WebSocket, `dispatch()` | `pyflue run <wf>`, `POST /workflows/<name>`, WebSocket |
-| Creates a run? | **No** — correlates by instance/operation | **Yes** — `/runs/<id>`, `flue logs` |
+| Creates a run? | **No** (correlates by instance/operation) | **Yes** (`/runs/<id>`, `flue logs`) |
 
 ```text
 Need a continuing instance or conversation? → an agent session.

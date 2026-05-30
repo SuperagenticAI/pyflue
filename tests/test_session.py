@@ -565,12 +565,16 @@ async def test_session_prompt_emits_flue_lifecycle_events(tmp_path):
     assert [event.type for event in events] == [
         "operation_start",
         "agent_start",
+        "turn_request",
+        "turn",
         "turn_end",
         "idle",
         "operation",
     ]
     assert events[0].data["session_id"] == "s1"
     assert events[0].data["operation_kind"] == "prompt"
+    turn = next(e for e in events if e.type == "turn")
+    assert turn.data["usage"]["total_tokens"] == 3
 
 
 @pytest.mark.asyncio

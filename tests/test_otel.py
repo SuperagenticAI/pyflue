@@ -60,6 +60,30 @@ def test_observer_builds_workflow_operation_tool_tree():
     assert workflow.attributes["flue.workflow.name"] == "summarize"
 
 
+def test_observer_creates_generation_span_with_usage():
+    tracer, exporter = _tracer_and_exporter()
+    observe = create_opentelemetry_observer(tracer=tracer)
+
+    observe(PyFlueEvent("operation_start", {"operation_id": "op1", "operation_kind": "prompt"}))
+    observe(PyFlueEvent("turn_request", {"operation_id": "op1", "turn_id": "t1", "purpose": "agent", "model": "m"}))
+    observe(PyFlueEvent("turn", {
+        "operation_id": "op1",
+        "turn_id": "t1",
+        "model": "m",
+        "usage": {"input": 10, "output": 5, "total_tokens": 15, "cost": {"total": 0.01}},
+    }))
+    observe(PyFlueEvent("operation", {"operation_id": "op1", "operation_kind": "prompt"}))
+
+    by_name = {span.name: span for span in exporter.get_finished_spans()}
+    assert "gen_ai.generate" in by_name
+    generation = by_name["gen_ai.generate"]
+    assert generation.attributes["gen_ai.request.model"] == "m"
+    assert generation.attributes["gen_ai.usage.total_tokens"] == 15
+    assert generation.attributes["gen_ai.usage.cost_total"] == 0.01
+    # The generation span nests under its operation.
+    assert generation.parent.span_id == by_name["flue.operation prompt"].context.span_id
+
+
 def test_observer_marks_errored_operation():
     tracer, exporter = _tracer_and_exporter()
     observe = create_opentelemetry_observer(tracer=tracer)
@@ -103,3 +127,4 @@ async def test_observer_traces_live_agent_prompt(tmp_path, monkeypatch):
 
     names = [span.name for span in exporter.get_finished_spans()]
     assert "flue.operation prompt" in names
+    assert "gen_ai.generate" in names  # per-turn generation span

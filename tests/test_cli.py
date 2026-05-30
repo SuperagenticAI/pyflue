@@ -17,6 +17,9 @@ def test_cli_init_and_skill_new(tmp_path, monkeypatch):
     assert (tmp_path / "demo" / ".agents" / "skills" / "triage.md").exists()
     assert (tmp_path / "demo" / ".agents" / "roles" / "coder.md").exists()
     assert (tmp_path / "demo" / "agents" / "default.py").exists()
+    # Canonical src/ layout examples (reference v0.8.x).
+    assert (tmp_path / "demo" / "src" / "agents" / "assistant.py").exists()
+    assert (tmp_path / "demo" / "src" / "workflows" / "summarize.py").exists()
 
     monkeypatch.chdir(tmp_path / "demo")
     result = runner.invoke(app, ["skill", "new", "review"])

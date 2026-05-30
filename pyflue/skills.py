@@ -46,6 +46,21 @@ def load_skill_by_path(
     return parse_skill(target)
 
 
+def load_skill(path: str | Path) -> Skill:
+    """Load and validate a single Markdown skill file as an importable Skill.
+
+    This is the packaged-skill entry point: point it at a ``SKILL.md`` (or any
+    ``.md`` skill file) and pass the result to ``create_agent(skills=[...])``,
+    ``define_agent_profile(skills=[...])``, or a session call. The reference
+    imports skills as validated ``SkillReference`` values; in Python the loaded
+    :class:`~pyflue.types.Skill` is that validated, reusable handle.
+    """
+    skill_path = Path(path).expanduser()
+    if not skill_path.is_file():
+        raise FileNotFoundError(f"Skill file not found: {path}")
+    return parse_skill(skill_path)
+
+
 def load_project_instructions(root: str | Path = ".") -> str:
     """Load root-level project instructions for the harness system prompt."""
     base = Path(root).expanduser().resolve()

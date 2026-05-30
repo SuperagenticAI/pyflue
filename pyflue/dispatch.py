@@ -3,7 +3,7 @@
 ``dispatch(agent, id=, session=, input=)`` accepts a JSON-serialisable payload
 for a persistent agent instance and returns immediately with a
 :class:`DispatchReceipt`. The agent processes the input asynchronously as a
-prompt operation in the targeted session — it does not block the caller and
+prompt operation in the targeted session. It does not block the caller and
 does not create a workflow run (it correlates by instance/operation, like a
 direct prompt).
 

@@ -8,7 +8,7 @@ GitHub webhook → verify signature → dispatch(agent, id=thread, session=threa
 ```
 
 It mirrors the reference [Chat guide](https://flueframework.com/docs/guide/chat/)
-without requiring a Chat-SDK dependency — the platform boundary is ordinary
+without requiring a Chat-SDK dependency. The platform boundary is ordinary
 application code, and outbound posting is an explicit, observable tool.
 
 ## Run
@@ -31,7 +31,7 @@ secret) at `POST /webhooks/github`.
   the agent processes the message in the background and replies through its tool.
   A dispatched message is an agent operation, not a workflow run.
 - **Outbound is an explicit tool.** `reply_to_chat_thread` closes over the
-  dispatched thread id, so the model only chooses the reply *text* — never the
+  dispatched thread id, so the model only chooses the reply *text*, never the
   destination. Swap `SENT_REPLIES` for a real provider client (and add an
   idempotency key) in production.
 - **Verify inbound, scope outbound.** The HMAC check rejects forged webhooks;

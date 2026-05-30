@@ -3,7 +3,7 @@
 The reference's ``local()`` (from ``@flue/runtime/node``) binds an agent
 directly to the host machine: file operations hit the real filesystem and the
 shell runs through a real subprocess. Crucially, environment exposure is
-**opt-in** — only a small allowlist of shell essentials is inherited from the
+**opt-in**: only a small allowlist of shell essentials is inherited from the
 host; secrets and tokens must be passed explicitly via ``env=``, keeping them
 out of the agent's ``bash`` tool by default.
 
@@ -102,7 +102,7 @@ class LocalSandbox(VirtualSandbox):
     ) -> dict[str, Any]:
         require_shell(self.policy, command)
         workdir = self.resolve(cwd or ".")
-        # Only the configured (allowlisted + explicit) env is exposed — NOT the
+        # Only the configured (allowlisted + explicit) env is exposed, NOT the
         # full host environment, unlike the virtual sandbox.
         completed = subprocess.run(
             command,

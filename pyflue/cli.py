@@ -85,6 +85,30 @@ def init_project(name: str = PROJECT_NAME_ARGUMENT, force: bool = False) -> None
         "    return {'text': result.text, 'metadata': result.metadata}\n",
         encoding="utf-8",
     )
+    # Canonical `src/` layout (reference v0.8.x): persistent agents in
+    # src/agents/ and finite workflows in src/workflows/. Both are discovered.
+    (root / "src" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "workflows").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "agents" / "assistant.py").write_text(
+        "from pyflue import create_agent\n\n"
+        "default = create_agent(\n"
+        "    lambda ctx: {\n"
+        '        "model": "openai:gpt-5.5",\n'
+        '        "instructions": f"Help with the request represented by {ctx.id}.",\n'
+        "    }\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "workflows" / "summarize.py").write_text(
+        "from pyflue import FlueContext, create_agent\n\n"
+        'agent = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})\n\n\n'
+        "async def run(ctx: FlueContext):\n"
+        "    harness = await ctx.init(agent)\n"
+        "    session = await harness.session()\n"
+        '    response = await session.prompt(f"Summarize:\\n\\n{ctx.payload.get(\'text\', \'\')}")\n'
+        '    return {"summary": response.text}\n',
+        encoding="utf-8",
+    )
     console.print(f"Created PyFlue project at {root}")
 
 

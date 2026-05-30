@@ -2,7 +2,7 @@
 
 This mirrors the TypeScript Flue reference (``packages/runtime/src/agent-definition.ts``):
 
-* ``create_agent(initialize)`` returns a deferred, composable agent *spec* — a
+* ``create_agent(initialize)`` returns a deferred, composable agent *spec*, a
   frozen :class:`CreatedAgent` holding an ``initialize`` factory. The factory
   receives an :class:`AgentCreateContext` (``id`` / ``env`` / ``payload``) and
   returns an :class:`AgentRuntimeConfig` (or a plain mapping).
@@ -70,7 +70,7 @@ class AgentProfile:
     """Reusable, model-facing agent behaviour shared across agents/workflows.
 
     A profile carries no runtime/environment concerns (sandbox, cwd,
-    persistence) — those live on :class:`AgentRuntimeConfig`.
+    persistence). Those live on :class:`AgentRuntimeConfig`.
     """
 
     name: str | None = None

@@ -66,5 +66,5 @@ Thumbs.db
 # Logs
 *.log
 logs/
-# reference
-reference/
+# reference checkout
+/reference/

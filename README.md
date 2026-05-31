@@ -47,12 +47,16 @@ pip install pyflue
 Optional extras:
 
 ```bash
+uv add "pyflue[deepagents]"
 uv add "pyflue[monty]"
+uv add "pyflue[otel]"
 uv add "pyflue[sandboxes]"
 ```
 
 ```bash
+pip install "pyflue[deepagents]"
 pip install "pyflue[monty]"
+pip install "pyflue[otel]"
 pip install "pyflue[sandboxes]"
 ```
 
@@ -152,7 +156,8 @@ async def main():
 | Subagents | Delegate to declared profiles with `task(agent="name")`. |
 | Dispatch | Accept asynchronous agent input with `dispatch(...)`. |
 | Observability | Correlated event stream and an OpenTelemetry adapter (`pyflue[otel]`). |
-| Harness backends | DeepAgents (default) or Pydantic AI, pluggable through a registry. |
+| Harness backends | Pydantic AI by default, DeepAgents as an optional extra, and custom backends through a registry. |
+| Models and providers | Use provider-qualified model strings, reasoning effort hints, and provider endpoint overrides. |
 | Markdown skills | Put reusable workflows in `.agents/skills/*.md`. |
 | Project instructions | Use `AGENTS.md` for global behavior and context. |
 | Roles | Scope behavior with `.agents/roles/*.md`. |
@@ -165,6 +170,7 @@ async def main():
 | Abort | Cancel active prompt, stream, task, and shell operations with `session.abort()`. |
 | Structured commands | Expose reusable shell or callable commands with `PyFlueCommand`. |
 | Python client | Call deployed PyFlue servers with `PyFlueClient`. |
+| Chat integrations | Use verified webhooks, `dispatch(...)`, and explicit reply tools for chat platforms. |
 | Webhooks | Expose `agents/*.py` as `/agents/{name}/{agent_id}`. |
 | Python code backend | Use `pyflue[monty]` for safe host-side Python snippets. |
 | Remote sandboxes | Use Daytona, E2B, Modal, or Runloop with optional extras. |
@@ -263,6 +269,12 @@ PyFlue starts with safe defaults:
 - command allowlists are supported with `allowed_commands`
 - secrets are not injected into prompts
 - secrets are mounted into sandbox calls only when requested with `secrets=[...]`
+
+For production webhooks, queues, and chat integrations, put durable delivery in
+front of `dispatch(...)`. The current Python dispatch path accepts work in
+process memory, so accepted work can be lost if the process exits before
+delivery finishes. See the
+[Production guide](https://superagenticai.github.io/pyflue/guides/production/).
 
 ## Deployment
 

@@ -8,6 +8,8 @@ import json
 import re
 import shlex
 import shutil
+import sys
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import contextmanager
@@ -68,6 +70,11 @@ BUILTIN_TOOL_NAMES = {
 }
 
 
+def _generate_operation_id() -> str:
+    """Return a unique id for one session operation (prompt/skill/task/shell/compact)."""
+    return f"op_{uuid.uuid4().hex}"
+
+
 def _estimate_tokens(text: str) -> int:
     """Estimate token count for text.
 
@@ -95,7 +102,7 @@ async def init(
     model: str | None = None,
     thinking_level: str | None = None,
     harness: str | None = None,
-    sandbox: str | None = None,
+    sandbox: Any = None,
     python_backend: str | None = None,
     skills_dir: str | Path | None = None,
     config_path: str | Path | None = None,
@@ -480,6 +487,8 @@ class PyFlueSession:
         self.session_role = role
         self.deleted = False
         self.active_operation: str | None = None
+        self.active_operation_id: str | None = None
+        self._operation_started_at: float | None = None
         self.metadata: dict[str, Any] = {
             "session_id": session_id,
             "parent_session_id": None,
@@ -526,7 +535,7 @@ class PyFlueSession:
         _source: str = "prompt",
     ) -> HarnessResult | Any:
         """Run one prompt turn."""
-        self._begin_operation("prompt")
+        await self._begin_operation("prompt")
         try:
             await self._refresh_context_from_sandbox()
             await self._maybe_auto_compact(model=model)
@@ -577,7 +586,7 @@ class PyFlueSession:
             raise
         finally:
             await self._emit_event("idle")
-            self._end_operation()
+            await self._end_operation()
 
     async def stream(
         self,
@@ -592,7 +601,7 @@ class PyFlueSession:
         tools: list[Any] | tuple[Any, ...] | None = None,
     ) -> AsyncIterator[PyFlueEvent]:
         """Stream normalized PyFlue events for one prompt turn."""
-        self._begin_operation("stream")
+        await self._begin_operation("stream")
         try:
             yield PyFlueEvent("start", {"session_id": self.session_id})
             await self._refresh_context_from_sandbox()
@@ -647,7 +656,7 @@ class PyFlueSession:
             raise
         finally:
             await self._emit_event("idle")
-            self._end_operation()
+            await self._end_operation()
 
     async def skill(
         self,
@@ -695,6 +704,7 @@ class PyFlueSession:
         prompt: str,
         *,
         result: type[BaseModel] | Any | None = None,
+        agent: str | None = None,
         role: str | None = None,
         model: str | None = None,
         thinking_level: str | None = None,
@@ -708,6 +718,7 @@ class PyFlueSession:
         output = await self.task(
             prompt,
             result=result,
+            agent=agent,
             role=role,
             model=model,
             thinking_level=thinking_level,
@@ -724,6 +735,7 @@ class PyFlueSession:
         prompt: str,
         *,
         result: type[BaseModel] | Any | None = None,
+        agent: str | None = None,
         role: str | None = None,
         model: str | None = None,
         thinking_level: str | None = None,
@@ -734,8 +746,26 @@ class PyFlueSession:
         tools: list[Any] | tuple[Any, ...] | None = None,
         cwd: str | None = None,
     ) -> HarnessResult | Any:
-        """Run a child task with shared sandbox and isolated history."""
-        self._begin_operation("task")
+        """Run a child task with shared sandbox and isolated history.
+
+        Pass ``agent="name"`` to delegate to a declared subagent profile (from
+        ``create_agent(subagents=[...])``); its instructions, model, reasoning
+        level, and tools become the child's defaults. Task-level ``model`` /
+        ``thinking_level`` / ``tools`` still override the profile.
+        """
+        if agent is not None:
+            profile = self._find_subagent_profile(agent)
+            if profile is None:
+                available = ", ".join(sorted(self._selectable_subagent_names())) or "(none)"
+                raise KeyError(f"Unknown subagent '{agent}'. Available: {available}")
+            role = role or agent  # _effective_role resolves the profile's instructions
+            if model is None and isinstance(profile.model, str) and profile.model:
+                model = profile.model
+            if thinking_level is None and profile.thinking_level is not None:
+                thinking_level = profile.thinking_level
+            if profile.tools:
+                tools = [*profile.tools, *(tools or ())]
+        await self._begin_operation("task")
         child_id = task_id or f"{self.session_id}:task:{uuid.uuid4().hex[:10]}"
         try:
             await self._emit_event(
@@ -771,7 +801,7 @@ class PyFlueSession:
             raise
         finally:
             await self._emit_event("idle")
-            self._end_operation()
+            await self._end_operation()
 
     async def _task_unchecked(
         self,
@@ -916,7 +946,7 @@ class PyFlueSession:
         commands: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """Run a shell command through the configured sandbox."""
-        self._begin_operation("shell")
+        await self._begin_operation("shell")
         command_name, args = _shell_command_parts(command)
         tool_call_id = uuid.uuid4().hex
         try:
@@ -959,7 +989,7 @@ class PyFlueSession:
             raise
         finally:
             await self._emit_event("idle")
-            self._end_operation()
+            await self._end_operation()
 
     async def read_file(self, path: str) -> str:
         """Read a file from the session sandbox."""
@@ -1015,7 +1045,7 @@ class PyFlueSession:
 
         Use keep_recent parameter for legacy message-count based compaction.
         """
-        self._begin_operation("compact")
+        await self._begin_operation("compact")
         try:
             return await self._compact_unchecked(keep_recent=keep_recent, model=model)
         except Exception as exc:
@@ -1023,7 +1053,7 @@ class PyFlueSession:
             raise
         finally:
             await self._emit_event("idle")
-            self._end_operation()
+            await self._end_operation()
 
     async def _compact_unchecked(
         self,
@@ -1452,6 +1482,7 @@ class PyFlueSession:
         images: list[Any] | tuple[Any, ...] | None = None,
         tools: list[Any] | tuple[Any, ...] | None = None,
         stream: bool,
+        purpose: str = "agent",
     ) -> HarnessResult:
         config = self.agent.config
         effective_role = self._effective_role(role)
@@ -1475,7 +1506,11 @@ class PyFlueSession:
         if resolved_thinking_level is not None:
             config = PyFlueConfig(**{**config.__dict__, "thinking_level": resolved_thinking_level})
         merged_tools = await self._merge_tools(tools)
-        return await self.agent.backend.run(
+        turn_id = f"turn_{uuid.uuid4().hex}"
+        await self._emit_event(
+            "turn_request", turn_id=turn_id, purpose=purpose, model=config.model
+        )
+        result = await self.agent.backend.run(
             prompt=prompt,
             system_prompt=self.instructions,
             config=config,
@@ -1487,6 +1522,28 @@ class PyFlueSession:
             images=images,
             stream=stream,
         )
+        usage = result.usage
+        await self._emit_event(
+            "turn",
+            turn_id=turn_id,
+            purpose=purpose,
+            model=(result.model.id if result.model else None) or config.model,
+            usage={
+                "input": usage.input,
+                "output": usage.output,
+                "cache_read": usage.cache_read,
+                "cache_write": usage.cache_write,
+                "total_tokens": usage.total_tokens,
+                "cost": {
+                    "input": usage.cost.input,
+                    "output": usage.cost.output,
+                    "cache_read": usage.cost.cache_read,
+                    "cache_write": usage.cost.cache_write,
+                    "total": usage.cost.total,
+                },
+            },
+        )
+        return result
 
     async def _stream_backend(
         self,
@@ -1826,10 +1883,33 @@ class PyFlueSession:
         if not role_name:
             return None
         selected = self.roles.get(role_name)
-        if selected is None:
-            available = ", ".join(sorted(self.roles)) or "(none)"
-            raise KeyError(f"Unknown role '{role_name}'. Available roles: {available}")
-        return selected
+        if selected is not None:
+            return selected
+        # Fall back to a declared subagent profile (from create_agent(subagents=...)).
+        profile = self._find_subagent_profile(role_name)
+        if profile is not None:
+            return Role(
+                name=profile.name or role_name,
+                instructions=profile.instructions or "",
+                description=profile.description or "",
+                model=profile.model if isinstance(profile.model, str) else None,
+                thinking_level=profile.thinking_level,
+            )
+        available = ", ".join(sorted(self._selectable_subagent_names())) or "(none)"
+        raise KeyError(f"Unknown role or subagent '{role_name}'. Available: {available}")
+
+    def _find_subagent_profile(self, name: str) -> Any | None:
+        for profile in getattr(self.agent, "subagents", None) or ():
+            if getattr(profile, "name", None) == name:
+                return profile
+        return None
+
+    def _selectable_subagent_names(self) -> list[str]:
+        names = list(self.roles)
+        for profile in getattr(self.agent, "subagents", None) or ():
+            if getattr(profile, "name", None):
+                names.append(profile.name)
+        return names
 
     def _assert_active(self) -> None:
         if self.deleted:
@@ -1862,11 +1942,20 @@ class PyFlueSession:
         if callback is None:
             return
         payload = {"session_id": self.session_id, **data}
+        operation_id = self.active_operation_id
+        if operation_id is not None and "operation_id" not in payload:
+            payload["operation_id"] = operation_id
+        instance_id = getattr(self.agent, "instance_id", None)
+        if instance_id is not None and "instance_id" not in payload:
+            payload["instance_id"] = instance_id
+        run_id = getattr(self.agent, "_flue_run_id", None)
+        if run_id is not None and "run_id" not in payload:
+            payload["run_id"] = run_id
         result = callback(PyFlueEvent(event_type, payload))
         if inspect.isawaitable(result):
             await result
 
-    def _begin_operation(self, operation: str) -> None:
+    async def _begin_operation(self, operation: str) -> None:
         self._assert_active()
         active_operation = self.agent._active_operations.get(self.session_id) or self.active_operation
         if active_operation is not None:
@@ -1875,17 +1964,41 @@ class PyFlueSession:
                 "Start another session for parallel conversation branches."
             )
         self.active_operation = operation
+        self.active_operation_id = _generate_operation_id()
+        self._operation_started_at = time.monotonic()
         self.agent._active_operations[self.session_id] = operation
         task = asyncio.current_task()
         if task is not None:
             self.agent._active_tasks[self.session_id] = task
+        # An operation is the finite boundary of one session action. Unlike a
+        # workflow run, it correlates by instance/operation id, not a run id.
+        await self._emit_event("operation_start", operation_kind=operation)
 
-    def _end_operation(self) -> None:
+    async def _end_operation(self) -> None:
+        operation_id = self.active_operation_id
+        operation_kind = self.active_operation
+        started_at = self._operation_started_at
+        duration_ms = (
+            int((time.monotonic() - started_at) * 1000) if started_at is not None else None
+        )
+        # In a `finally:` an in-flight exception (including an abort) marks the
+        # operation as errored without threading status through every caller.
+        is_error = sys.exc_info()[0] is not None
         self.active_operation = None
+        self.active_operation_id = None
+        self._operation_started_at = None
         task = asyncio.current_task()
         if self.agent._active_tasks.get(self.session_id) is task:
             self.agent._active_tasks.pop(self.session_id, None)
         self.agent._active_operations.pop(self.session_id, None)
+        if operation_id is not None:
+            await self._emit_event(
+                "operation",
+                operation_id=operation_id,
+                operation_kind=operation_kind,
+                duration_ms=duration_ms,
+                is_error=is_error,
+            )
 
 
 def _parse_typed_result(text: str, result: Any) -> Any:

@@ -960,7 +960,7 @@ def observe(callback: Any) -> Any:
     """Register a process-global subscriber for every run event.
 
     The callback receives ``(run, event)`` and may be sync or async. Exceptions
-    raised by the callback are swallowed — observers must never break the run
+    raised by the callback are swallowed so observers never break the run
     loop. Returns the callback so it can be used as a decorator.
 
     Intended for cross-cutting integrations like error reporting, log

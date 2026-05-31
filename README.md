@@ -8,12 +8,14 @@
 [![License](https://img.shields.io/pypi/l/pyflue)](https://github.com/SuperagenticAI/pyflue/blob/main/LICENSE)
 
 
-PyFlue is the agent harness framework for Python. It gives you Markdown skills,
-stateful sessions, sandboxed filesystem and shell access, typed Pydantic
-outputs, streaming events, file-based webhook routes, and deployment-ready
-project structure.
+PyFlue is the agent harness framework for Python. You build persistent **agents**
+and finite **workflows**, with Markdown skills, stateful sessions, sandboxed
+filesystem and shell access, typed Pydantic outputs, streaming events,
+OpenTelemetry tracing, and deployment-ready project structure.
 
-PyFlue adapts the agent harness model for Python teams.
+PyFlue adapts the agent harness model for Python teams. The harness that drives
+it is pluggable: Pydantic AI by default (typed, model agnostic, no LangChain), or
+DeepAgents for LangChain users, with the registry open for more backends.
 
 > **Warning: Active Development**
 >
@@ -68,6 +70,49 @@ Run a local server/client smoke demo without a model key:
 uv run python examples/server_client/run_smoke.py
 ```
 
+## Agents and Workflows
+
+PyFlue has two boundaries for model driven work. A persistent **agent** keeps
+sessions over time; a finite **workflow** runs one bounded operation and returns
+a result.
+
+```python
+# A persistent agent in src/agents/assistant.py
+from pyflue import create_agent
+
+default = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})
+```
+
+```python
+# A finite workflow in src/workflows/summarize.py
+from pyflue import FlueContext, create_agent
+
+agent = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})
+
+
+async def run(ctx: FlueContext) -> dict:
+    harness = await ctx.init(agent)
+    session = await harness.session()
+    response = await session.prompt(ctx.payload["text"])
+    return {"summary": response.text}
+```
+
+Agents are served at `POST /agents/<name>/<id>` and over WebSocket, and accept
+asynchronous input with `dispatch(...)`. Workflows run with `pyflue run <name>`,
+`POST /workflows/<name>`, or WebSocket. See the
+[Agents vs Workflows](https://superagenticai.github.io/pyflue/concepts/agents-vs-workflows/)
+guide.
+
+## Choose a harness
+
+The harness that runs the model loop is pluggable and does not change your agent
+or workflow code.
+
+```python
+agent = await init(harness="pydanticai")    # default: typed, model agnostic, no LangChain
+agent = await init(harness="deepagents")    # optional, for LangChain users: pip install 'pyflue[deepagents]'
+```
+
 ## Python API
 
 ```python
@@ -102,6 +147,12 @@ async def main():
 
 | Capability | What it means |
 | --- | --- |
+| Agents | Define persistent, addressable agents with `create_agent`, served over HTTP and WebSocket. |
+| Workflows | Define finite operations with `run(ctx)`, run locally, over HTTP, or WebSocket. |
+| Subagents | Delegate to declared profiles with `task(agent="name")`. |
+| Dispatch | Accept asynchronous agent input with `dispatch(...)`. |
+| Observability | Correlated event stream and an OpenTelemetry adapter (`pyflue[otel]`). |
+| Harness backends | DeepAgents (default) or Pydantic AI, pluggable through a registry. |
 | Markdown skills | Put reusable workflows in `.agents/skills/*.md`. |
 | Project instructions | Use `AGENTS.md` for global behavior and context. |
 | Roles | Scope behavior with `.agents/roles/*.md`. |
@@ -122,6 +173,9 @@ async def main():
 
 ## Project Layout
 
+`src/` is the canonical layout. Agents and workflows are also discovered from
+the project root and from `.agents` or `.pyflue`.
+
 ```text
 AGENTS.md
 pyflue.toml
@@ -130,11 +184,18 @@ pyflue.toml
     coder.md
   skills/
     triage.md
-agents/
-  default.py
+src/
+  agents/
+    assistant.py
+  workflows/
+    summarize.py
 ```
 
-## File-Based Agent
+## File-Based Agent (legacy)
+
+The original file based handler model is still supported and is treated as
+workflow like. New projects use `create_agent` agents and `run(ctx)` workflows
+(see [Agents and Workflows](#agents-and-workflows)).
 
 ```python
 triggers = {"webhook": True}

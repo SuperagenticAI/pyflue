@@ -50,6 +50,7 @@ nav:
   - Getting Started: getting-started.md
   - Deployment: deployment.md
   - Core Concepts:
+      - Agents vs Workflows: concepts/agents-vs-workflows.md
       - Agent Harness: concepts/harness.md
       - Skills: concepts/skills.md
       - Roles And Routing: concepts/roles-and-routing.md
@@ -64,9 +65,16 @@ nav:
       - Configuration: api/configuration.md
       - Harness Backends: api/harness-backends.md
   - Guides:
+      - Agents: guides/agents.md
+      - Workflows: guides/workflows.md
+      - Subagents: guides/subagents.md
+      - Tools: guides/tools.md
+      - Client: guides/client.md
+      - Observability: guides/observability.md
       - Build a Coding Agent: guides/coding-agent.md
       - Example Agents: guides/example-agents.md
       - Create a Skill: guides/create-a-skill.md
       - Use the Sandbox: guides/use-the-sandbox.md
   - Reference:
       - Feature Matrix: reference/feature-matrix.md
+      - Parity with Flue: reference/flue-parity.md

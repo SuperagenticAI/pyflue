@@ -40,7 +40,7 @@ def _config_from_data(
     config_path: Path | None,
 ) -> PyFlueConfig:
     agent = data.get("agent", {}) if isinstance(data.get("agent"), dict) else {}
-    harness = str(agent.get("harness", "deepagents") or "deepagents")
+    harness = str(agent.get("harness", "pydanticai") or "pydanticai")
     sandbox = str(agent.get("sandbox", "virtual") or "virtual")
     thinking_level = agent.get("thinking_level")
     python_backend = agent.get("python_backend")

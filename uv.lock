@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -4161,15 +4161,15 @@ wheels = [
 
 [[package]]
 name = "pyflue"
-version = "0.1.5"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
-    { name = "deepagents" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "pydantic" },
+    { name = "pydantic-ai" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -4182,7 +4182,12 @@ dependencies = [
 daytona = [
     { name = "daytona-sdk" },
 ]
+deepagents = [
+    { name = "deepagents" },
+]
 dev = [
+    { name = "deepagents" },
+    { name = "opentelemetry-sdk" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -4209,6 +4214,9 @@ openai = [
     { name = "openai" },
     { name = "openai-agents" },
 ]
+otel = [
+    { name = "opentelemetry-api" },
+]
 pydanticai = [
     { name = "pydantic-ai" },
     { name = "pydantic-ai-harness", extra = ["code-mode"] },
@@ -4226,6 +4234,7 @@ sandboxes = [
 server = [
     { name = "fastapi" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -4233,7 +4242,8 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "daytona-sdk", marker = "extra == 'daytona'", specifier = ">=0.22.0" },
     { name = "daytona-sdk", marker = "extra == 'sandboxes'", specifier = ">=0.22.0" },
-    { name = "deepagents", specifier = ">=0.5.6,<0.6.0" },
+    { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.5.6,<0.6.0" },
+    { name = "deepagents", marker = "extra == 'dev'", specifier = ">=0.5.6,<0.6.0" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.7.0" },
     { name = "e2b", marker = "extra == 'sandboxes'", specifier = ">=2.7.0" },
     { name = "fastapi", specifier = ">=0.124.0,<1" },
@@ -4248,7 +4258,10 @@ requires-dist = [
     { name = "modal", marker = "extra == 'sandboxes'", specifier = ">=1.3.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.26.0,<3" },
     { name = "openai-agents", marker = "extra == 'openai'", specifier = ">=0.15.1,<0.16.0" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.20" },
     { name = "pydantic", specifier = ">=2.12.2,<3" },
+    { name = "pydantic-ai", specifier = ">=1.89.1,<1.90.0" },
     { name = "pydantic-ai", marker = "extra == 'pydanticai'", specifier = ">=1.89.1,<1.90.0" },
     { name = "pydantic-ai-harness", extras = ["code-mode"], marker = "extra == 'pydanticai'" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydanticai'", specifier = ">=1.89.1,<1.90.0" },
@@ -4266,8 +4279,9 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.38.0,<1" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.38.0,<1" },
     { name = "watchdog", specifier = ">=6,<7" },
+    { name = "websockets", marker = "extra == 'server'", specifier = ">=12" },
 ]
-provides-extras = ["openai", "google", "daytona", "e2b", "modal", "runloop", "sandboxes", "pydanticai", "dev", "docs", "monty", "server"]
+provides-extras = ["openai", "google", "daytona", "e2b", "modal", "runloop", "sandboxes", "deepagents", "pydanticai", "dev", "docs", "monty", "otel", "server"]
 
 [[package]]
 name = "pygments"

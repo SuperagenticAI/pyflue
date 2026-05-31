@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import inspect
 import os
@@ -10,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pyflue.agents import init_agent, is_created_agent
 from pyflue.config import load_config
 from pyflue.core import init
 from pyflue.errors import PyFlueError, error_envelope
@@ -28,8 +30,14 @@ class AgentRoute:
 
 
 @dataclass
-class PyFlueContext:
-    """Context object passed to file-based agent handlers."""
+class FlueContext:
+    """Context passed to workflow ``run(ctx)`` functions and file-based handlers.
+
+    For a workflow, ``ctx.id`` is the run id and ``ctx.payload`` is the
+    invocation payload. ``ctx.init(agent)`` initializes a created agent (from
+    ``create_agent``) with this invocation's identity; the legacy
+    ``ctx.init(**kwargs)`` form is still supported.
+    """
 
     payload: dict[str, Any] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
@@ -37,12 +45,14 @@ class PyFlueContext:
     route: AgentRoute | None = None
     config: PyFlueConfig | None = None
     run_id: str | None = None
+    request: Any = None
+    workflow_name: str | None = None
     _run_store: Any = None
 
     class _Log:
         """Structured handler logs that land in the run event stream."""
 
-        def __init__(self, ctx: PyFlueContext) -> None:
+        def __init__(self, ctx: FlueContext) -> None:
             self._ctx = ctx
 
         async def _emit(self, level: str, message: str, **fields: Any) -> None:
@@ -63,13 +73,55 @@ class PyFlueContext:
 
     @property
     def log(self) -> _Log:
-        return PyFlueContext._Log(self)
+        return FlueContext._Log(self)
 
-    async def init(self, **kwargs: Any) -> Any:
-        """Initialize a PyFlue agent with route config defaults."""
+    @property
+    def id(self) -> str:
+        """Stable identity for this invocation. For workflows, equals the run id."""
+        return self.run_id or self.agent_id
+
+    @property
+    def req(self) -> Any:
+        """The HTTP request associated with this invocation, when available."""
+        return self.request
+
+    async def init(self, agent: Any = None, **kwargs: Any) -> Any:
+        """Initialize an agent for this invocation.
+
+        Pass a created agent (from ``create_agent``) to resolve it with this
+        invocation's id, payload, and env. Without an argument, the legacy
+        keyword form builds an agent directly.
+        """
+        if is_created_agent(agent):
+            opts = dict(kwargs)
+            if self.config is not None:
+                opts.setdefault(
+                    "config_path",
+                    self.config.config_path or self.config.root / "pyflue.toml",
+                )
+            harness = await init_agent(
+                agent,
+                id=self.id,
+                payload=self.payload,
+                env=self.env,
+                **opts,
+            )
+            # Tag this environment's session events with the workflow run id so
+            # observers (e.g. OpenTelemetry) can nest operations under the run.
+            if self.run_id is not None:
+                harness._flue_run_id = self.run_id
+            return harness
+        if agent is not None:
+            raise ValueError(
+                "[pyflue] ctx.init(agent) expects a created agent from create_agent()."
+            )
         if self.config is not None:
             kwargs.setdefault("config_path", self.config.config_path or self.config.root / "pyflue.toml")
         return await init(env=self.env, **kwargs)
+
+
+# Backwards-compatible alias (the file-based handler context predates workflows).
+PyFlueContext = FlueContext
 
 
 def discover_agent_routes(
@@ -83,7 +135,9 @@ def discover_agent_routes(
         directory = Path(agents_dir).expanduser()
         candidates.append(directory if directory.is_absolute() else base / directory)
     else:
-        candidates.extend([base / "agents", base / ".agents"])
+        # Reference parity (v0.8.x): `src/` is the canonical layout for new
+        # projects, alongside the legacy root and `.agents/` locations.
+        candidates.extend([base / "agents", base / ".agents", base / "src" / "agents"])
 
     routes: dict[str, AgentRoute] = {}
     for directory in candidates:
@@ -184,6 +238,60 @@ def _load_triggers(path: Path) -> dict[str, Any]:
     spec.loader.exec_module(module)
     triggers = getattr(module, "triggers", {"webhook": True})
     return dict(triggers) if isinstance(triggers, dict) else {"webhook": True}
+
+
+def load_agent_default(path: Path) -> Any:
+    """Load an agent module and return its default export.
+
+    The result is either a :class:`~pyflue.agents.CreatedAgent` (a persistent,
+    addressable agent) or a callable ``default(context)`` / ``agent(context)``
+    handler (the file-based handler model). Returns ``None`` when neither
+    export is present.
+    """
+    spec = importlib.util.spec_from_file_location(f"pyflue_agent_{path.stem}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load agent file: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "default", None) or getattr(module, "agent", None)
+
+
+class AgentInstanceManager:
+    """Process-level cache of persistent agent instances, keyed by (name, id).
+
+    Repeated direct interactions with the same agent instance reuse one
+    initialized :class:`~pyflue.core.PyFlueAgent`, giving session continuity
+    without re-initializing skills/MCP/sandbox per request. Conversation state
+    itself is persisted per session by the session store.
+    """
+
+    def __init__(self) -> None:
+        self._instances: dict[tuple[str, str], Any] = {}
+        self._lock = asyncio.Lock()
+
+    async def get_or_create(
+        self,
+        *,
+        name: str,
+        created_agent: Any,
+        instance_id: str,
+        config_path: str | Path = "pyflue.toml",
+    ) -> Any:
+        key = (name, instance_id)
+        async with self._lock:
+            instance = self._instances.get(key)
+            if instance is None:
+                instance = await init_agent(
+                    created_agent, id=instance_id, config_path=config_path
+                )
+                self._instances[key] = instance
+            return instance
+
+    def drop(self, name: str, instance_id: str) -> None:
+        self._instances.pop((name, instance_id), None)
+
+    def clear(self) -> None:
+        self._instances.clear()
 
 
 def _safe_env() -> dict[str, str]:

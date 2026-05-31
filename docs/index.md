@@ -30,20 +30,41 @@ pyflue run --prompt "Review this project"
 </div>
 
 PyFlue gives Python developers a framework-shaped agent runtime instead of a
-collection of low-level primitives. The default backend is DeepAgents, with a
-stable PyFlue API layered above it.
+collection of low-level primitives. The default backend is Pydantic AI, a typed
+and model agnostic loop with no LangChain dependency. DeepAgents is available as
+an optional extra for LangChain users. A stable PyFlue API is layered above the
+harness.
 
 PyFlue provides Markdown skills, stateful sessions, sandboxed tools, typed
 outputs, and deployable agent entrypoints for Python teams with Pydantic,
 Python packaging, and Python-friendly deployment targets.
 
-The public model is simple:
+PyFlue has two boundaries for model driven work, matching the Flue model. A
+persistent **agent** keeps sessions over time; a finite **workflow** runs one
+bounded operation and returns a result.
 
 ```python
-agent = await init(model="openai:gpt-5.5", harness="deepagents")
-session = await agent.session("issue-123")
-result = await session.skill("triage", args={"issue_number": 123}, result=FixResult)
+# A persistent agent in src/agents/assistant.py
+from pyflue import create_agent
+
+default = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})
 ```
+
+```python
+# A finite workflow in src/workflows/summarize.py
+from pyflue import FlueContext, create_agent
+
+agent = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})
+
+
+async def run(ctx: FlueContext) -> dict:
+    harness = await ctx.init(agent)
+    session = await harness.session()
+    response = await session.prompt(ctx.payload["text"])
+    return {"summary": response.text}
+```
+
+See [Agents vs Workflows](concepts/agents-vs-workflows.md) for when to use each.
 
 PyFlue is designed for Python teams that want the ergonomics of a modern agent
 harness while keeping access to the Python ecosystem. It is useful for coding
@@ -81,9 +102,8 @@ PyFlue gives you the core pieces needed for agentic workflows:
 - cancellation for active prompt, stream, task, and shell operations
 - structured command tools with `PyFlueCommand`
 - a Python client for deployed PyFlue servers
-- a DeepAgents runtime backend
-- a backend registry for future OpenAI Agents, Google ADK, Pydantic AI, and
-  custom harness backends
+- a default Pydantic AI runtime backend, with DeepAgents available as an optional extra
+- a backend registry for OpenAI Agents, Google ADK, and custom harness backends
 - streaming events through Python, CLI, and SSE
 - route triggers for file-based webhook agents
 - secret grants for shell and prompt calls
@@ -126,7 +146,8 @@ async def main():
 ## Next Steps
 
 - Start with [Getting Started](getting-started.md).
-- Learn the [agent harness model](concepts/harness.md).
-- Choose a [deployment target](deployment.md).
-- Create your first [Markdown skill](guides/create-a-skill.md).
-- Review the [feature matrix](reference/feature-matrix.md).
+- Understand [Agents vs Workflows](concepts/agents-vs-workflows.md).
+- Build an [agent](guides/agents.md) or a [workflow](guides/workflows.md).
+- Add [tools](guides/tools.md), [subagents](guides/subagents.md), and [observability](guides/observability.md).
+- Connect with the [client](guides/client.md) and choose a [deployment target](deployment.md).
+- Check [parity with Flue](reference/flue-parity.md) and the [feature matrix](reference/feature-matrix.md).

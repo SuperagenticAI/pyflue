@@ -12,6 +12,16 @@ from typing import Any
 
 from starlette.requests import Request
 
+try:
+    # Imported at module scope so FastAPI can resolve the `WebSocket` annotation
+    # under `from __future__ import annotations`. Guarded so the module still
+    # imports without the server extra (create_app raises a clear error then).
+    from fastapi import WebSocket, WebSocketDisconnect
+except ImportError:  # pragma: no cover - server extra not installed
+    WebSocket = Any  # type: ignore[assignment,misc]
+    WebSocketDisconnect = Exception  # type: ignore[assignment,misc]
+
+from pyflue.agents import is_created_agent
 from pyflue.api_schemas import (
     AbortSessionResponse,
     AgentListResponse,
@@ -31,8 +41,37 @@ from pyflue.errors import (
     parse_json_payload,
     validate_agent_request,
 )
-from pyflue.routing import discover_agent_routes, invoke_route
+from pyflue.routing import (
+    AgentInstanceManager,
+    discover_agent_routes,
+    invoke_route,
+    load_agent_default,
+)
 from pyflue.runs import generate_run_id, get_default_run_store
+
+
+def _prompt_result_payload(result: Any) -> dict[str, Any]:
+    """Shape a prompt result into the reference ``{text, usage, model}`` envelope."""
+    usage = result.usage
+    return {
+        "text": result.text,
+        "metadata": getattr(result, "metadata", {}),
+        "usage": {
+            "input": usage.input,
+            "output": usage.output,
+            "cache_read": usage.cache_read,
+            "cache_write": usage.cache_write,
+            "total_tokens": usage.total_tokens,
+            "cost": {
+                "input": usage.cost.input,
+                "output": usage.cost.output,
+                "cache_read": usage.cost.cache_read,
+                "cache_write": usage.cost.cache_write,
+                "total": usage.cost.total,
+            },
+        },
+        "model": {"id": result.model.id},
+    }
 
 
 def create_app(config_path: str | Path = "pyflue.toml") -> Any:
@@ -62,6 +101,7 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
         description="Public PyFlue agent invocation and run inspection API.",
     )
     app.state.pyflue_agent = None
+    app.state.instance_manager = AgentInstanceManager()
     from pyflue.admin import create_admin_app
 
     app.mount("/admin", create_admin_app(get_default_run_store()))
@@ -106,7 +146,9 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             "config_path": str(resolved_config_path),
             "config_mtime": _mtime(resolved_config_path),
             "harness": config.harness,
-            "sandbox": config.sandbox,
+            "sandbox": config.sandbox
+            if isinstance(config.sandbox, str)
+            else getattr(config.sandbox, "__name__", "factory"),
             "route_count": len(routes),
             "routes": [_route_status(route) for route in sorted(routes.values(), key=lambda item: item.name)],
             "agents": sorted(routes),
@@ -151,6 +193,52 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
             "</body></html>"
         )
 
+    async def _run_persistent_agent(
+        name: str, instance_id: str, request: Request, created_agent: Any
+    ) -> Any:
+        """Handle a direct prompt to a persistent agent instance.
+
+        Continues the instance's session, persists conversation state, and
+        returns the reference ``{result: {...}}`` envelope. This is an agent
+        interaction, not a workflow run, so it creates no run id.
+        """
+        body = await parse_json_payload(request)
+        message = str(body.get("message") or body.get("prompt") or "")
+        session_name = str(body.get("session") or "default")
+        pf = await app.state.instance_manager.get_or_create(
+            name=name,
+            created_agent=created_agent,
+            instance_id=instance_id,
+            config_path=config_path,
+        )
+        session_key = f"{instance_id}:{session_name}"
+
+        accept = request.headers.get("accept", "")
+        if "text/event-stream" in accept.lower():
+            async def events() -> Any:
+                session = await pf.session(session_key)
+                try:
+                    async for event in session.stream(message):
+                        yield (
+                            f"event: {event.type}\n"
+                            f"data: {json.dumps({'type': event.type, **event.data})}\n\n"
+                        )
+                except Exception as exc:
+                    error = PyFlueError(
+                        type="internal_error",
+                        message="An internal error occurred.",
+                        details="The server encountered an unexpected error while streaming this agent.",
+                        dev=str(exc),
+                        status=500,
+                    )
+                    yield f"event: error\ndata: {json.dumps(error_envelope(error, dev=True))}\n\n"
+
+            return StreamingResponse(events(), media_type="text/event-stream")
+
+        session = await pf.session(session_key)
+        result = await session.prompt(message)
+        return JSONResponse(jsonable_encoder({"result": _prompt_result_payload(result)}))
+
     @app.post(
         "/agents/{name}/{agent_id}",
         responses={
@@ -175,8 +263,11 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
                 route.name for route in routes.values() if route.triggers.get("webhook") is not False
             ),
         )
-        payload = await parse_json_payload(request)
         route = routes[name]
+        default_obj = load_agent_default(route.path)
+        if is_created_agent(default_obj):
+            return await _run_persistent_agent(name, agent_id, request, default_obj)
+        payload = await parse_json_payload(request)
         run_id = generate_run_id()
         store = get_default_run_store()
 
@@ -250,6 +341,219 @@ def create_app(config_path: str | Path = "pyflue.toml") -> Any:
     )
     async def reject_agent_method(name: str, agent_id: str, request: Request) -> Any:
         raise MethodNotAllowedError(request.method, ["POST"])
+
+    @app.post(
+        "/agents/{name}/{agent_id}/dispatch",
+        responses={
+            202: {"model": WebhookAcceptedResponse, "description": "Input accepted for async processing."},
+            **error_responses,
+        },
+    )
+    async def dispatch_agent(name: str, agent_id: str, request: Request) -> Any:
+        from pyflue.dispatch import dispatch as dispatch_input
+
+        routes = discover_agent_routes(config.root, config.agents_dir)
+        if name not in routes:
+            raise PyFlueError(
+                type="not_found",
+                message=f"Unknown agent: {name}.",
+                details=f"Available agents: {', '.join(sorted(routes)) or '(none)'}.",
+                status=404,
+            )
+        default_obj = load_agent_default(routes[name].path)
+        if not is_created_agent(default_obj):
+            raise PyFlueError(
+                type="invalid_request",
+                message="dispatch() requires a persistent agent.",
+                details="This agent module is not a create_agent() default export.",
+                status=400,
+            )
+        body = await parse_json_payload(request)
+        receipt = await dispatch_input(
+            default_obj,
+            id=agent_id,
+            session=body.get("session"),
+            input=body.get("input"),
+            config_path=config_path,
+        )
+        return JSONResponse(
+            {
+                "status": "accepted",
+                "dispatch_id": receipt.dispatch_id,
+                "dispatchId": receipt.dispatch_id,
+                "accepted_at": receipt.accepted_at,
+                "acceptedAt": receipt.accepted_at,
+            },
+            status_code=202,
+        )
+
+    @app.post(
+        "/workflows/{name}",
+        responses={
+            200: {
+                "description": "Workflow result (?wait=result) or SSE stream (Accept: text/event-stream).",
+                "content": {
+                    "application/json": {"schema": {"type": "object", "additionalProperties": True}},
+                    "text/event-stream": {"schema": {"type": "string"}},
+                },
+            },
+            202: {"model": WebhookAcceptedResponse, "description": "Workflow accepted; inspect via run id."},
+            **error_responses,
+        },
+    )
+    async def run_workflow(name: str, request: Request) -> Any:
+        from pyflue.workflows import (
+            discover_workflows,
+            generate_workflow_run_id,
+            invoke_workflow,
+        )
+
+        workflows = discover_workflows(config.root, getattr(config, "workflows_dir", None))
+        if name not in workflows:
+            available = ", ".join(sorted(workflows)) or "(none)"
+            raise PyFlueError(
+                type="not_found",
+                message=f"Unknown workflow: {name}.",
+                details=f"Available workflows: {available}.",
+                status=404,
+            )
+        payload = await parse_json_payload(request)
+        workflow = workflows[name]
+        run_id = generate_workflow_run_id(name)
+        store = get_default_run_store()
+
+        async def invoke() -> Any:
+            return await invoke_workflow(
+                workflow,
+                payload=payload,
+                config_path=config_path,
+                run_store=store,
+                run_id=run_id,
+                request=request,
+            )
+
+        accept = request.headers.get("accept", "")
+        if "text/event-stream" in accept.lower():
+            async def events() -> Any:
+                task = asyncio.create_task(invoke())
+                try:
+                    async for event in store.subscribe(run_id, after=0):
+                        yield (
+                            f"id: {event.event_index}\n"
+                            f"event: {event.type}\n"
+                            f"data: {json.dumps(event.to_dict())}\n\n"
+                        )
+                        if event.type == "run_end":
+                            break
+                    await task
+                except Exception as exc:
+                    error = PyFlueError(
+                        type="internal_error",
+                        message="An internal error occurred.",
+                        details="The server encountered an unexpected error while streaming this workflow.",
+                        dev=str(exc),
+                        status=500,
+                    )
+                    yield f"event: error\ndata: {json.dumps(error_envelope(error, dev=True))}\n\n"
+
+            return StreamingResponse(
+                events(),
+                media_type="text/event-stream",
+                headers={"X-Flue-Run-Id": run_id},
+            )
+
+        if request.query_params.get("wait") == "result":
+            result = await invoke()
+            return JSONResponse(
+                jsonable_encoder(
+                    {"status": "completed", "run_id": run_id, "runId": run_id, "result": result}
+                ),
+                headers={"X-Flue-Run-Id": run_id},
+            )
+
+        task = asyncio.create_task(invoke())
+        task.add_done_callback(_consume_background_exception)
+        return JSONResponse(
+            {"status": "accepted", "run_id": run_id, "runId": run_id},
+            status_code=202,
+            headers={"X-Flue-Run-Id": run_id},
+        )
+
+    @app.websocket("/agents/{name}/{agent_id}")
+    async def agent_websocket(websocket: WebSocket, name: str, agent_id: str) -> None:
+        """Persistent agent WebSocket: multiple prompts over one connection."""
+        await websocket.accept()
+        routes = discover_agent_routes(config.root, config.agents_dir)
+        created = load_agent_default(routes[name].path) if name in routes else None
+        if not is_created_agent(created):
+            await websocket.send_json(
+                {"type": "error", "error": {"type": "not_found", "message": f"Unknown persistent agent: {name}."}}
+            )
+            await websocket.close()
+            return
+        pf = await app.state.instance_manager.get_or_create(
+            name=name, created_agent=created, instance_id=agent_id, config_path=config_path
+        )
+        try:
+            while True:
+                message_in = await websocket.receive_json()
+                message = str(message_in.get("message") or message_in.get("prompt") or "")
+                session_name = str(message_in.get("session") or "default")
+                session = await pf.session(f"{agent_id}:{session_name}")
+                result = await session.prompt(message)
+                await websocket.send_json({"type": "result", "result": _prompt_result_payload(result)})
+        except WebSocketDisconnect:
+            return
+
+    @app.websocket("/workflows/{name}")
+    async def workflow_websocket(websocket: WebSocket, name: str) -> None:
+        """Workflow WebSocket: one invocation streams its run events, then closes."""
+        from pyflue.workflows import (
+            discover_workflows,
+            generate_workflow_run_id,
+            invoke_workflow,
+        )
+
+        await websocket.accept()
+        workflows = discover_workflows(config.root, getattr(config, "workflows_dir", None))
+        if name not in workflows:
+            await websocket.send_json(
+                {"type": "error", "error": {"type": "not_found", "message": f"Unknown workflow: {name}."}}
+            )
+            await websocket.close()
+            return
+        try:
+            invoke_message = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        payload = invoke_message.get("payload", invoke_message) if isinstance(invoke_message, dict) else {}
+        run_id = generate_workflow_run_id(name)
+        store = get_default_run_store()
+        task = asyncio.create_task(
+            invoke_workflow(
+                workflows[name], payload=payload, config_path=config_path, run_store=store, run_id=run_id
+            )
+        )
+        task.add_done_callback(_consume_background_exception)
+        try:
+            async for event in store.subscribe(run_id, after=0):
+                await websocket.send_json({"type": event.type, **event.to_dict()})
+                if event.type == "run_end":
+                    break
+            run = store.get_run(run_id)
+            if run is not None and not run.is_error:
+                await websocket.send_json(
+                    {"type": "result", "run_id": run_id, "runId": run_id, "result": jsonable_encoder(run.result)}
+                )
+            elif run is not None:
+                await websocket.send_json(
+                    {"type": "error", "error": run.error or {"type": "internal_error", "message": "Workflow failed."}}
+                )
+        except WebSocketDisconnect:
+            return
+        finally:
+            with suppress(Exception):
+                await websocket.close()
 
     @app.post("/prompt/{agent_id}", response_model=PromptResponse, responses=error_responses)
     async def prompt(agent_id: str, request: Request) -> dict[str, Any]:

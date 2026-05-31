@@ -2,13 +2,36 @@
 
 This page shows what users can rely on today and what is planned next.
 
+## Agents & Workflows (v0.3.0)
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| `create_agent()` + profiles | Implemented | Composable agents; `define_agent_profile()`, `init_agent()`. |
+| Workflows | Implemented | `workflows/**/run(ctx)`, `pyflue run <wf>`, `POST /workflows/{name}` (accepted / `?wait=result` / SSE). |
+| `FlueContext` | Implemented | `ctx.id`, `ctx.payload`, `ctx.env`, `ctx.req`, `ctx.log`, `ctx.init(agent)`. (`PyFlueContext` aliased.) |
+| Persistent agent instances | Implemented | `create_agent` default-export served at `POST /agents/{name}/{id}` with session continuity; no run id. |
+| Session stores | Implemented | `SessionStore` protocol + `InMemorySessionStore` + `SQLiteSessionStore`. |
+| `dispatch()` | Implemented | Async agent input + `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`. Process-memory admission. |
+| Operation events | Implemented | `operation_start`/`operation` with `operation_id`/`instance_id`. |
+| Generation telemetry | Implemented | `turn_request`/`turn` events carry model and token usage; mapped to `gen_ai.*` spans. |
+| OpenTelemetry | Implemented | `create_opentelemetry_observer()` (`pyflue[otel]`); workflow, operation, generation, tool, task, and compaction spans. |
+| Host `local()` sandbox | Implemented | Real fs + subprocess shell, opt-in env allowlist. |
+| Subagent profiles | Implemented | `task(agent="name")` selection; `profile_to_role()`/`role_to_profile()` bridge. |
+| Packaged skills | Implemented | `load_skill(path)` imports a `SKILL.md` as a reusable `Skill`. |
+| WebSocket | Implemented | Agent (multi-prompt) + workflow (one run); client `agents.connect`/`workflows.connect`. |
+| `ToolDefinition` | Implemented | Canonical name for `ToolDef` (aliased). |
+| Source layouts | Implemented | Discovers `src/agents` and `src/workflows` plus legacy root/`.agents`/`.pyflue`. |
+| Durable execution | Not ported | Cloudflare-specific run recovery. See [Parity with Flue](flue-parity.md). |
+
+## Core
+
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Python package | Implemented | `pyflue` package with console script. |
-| DeepAgents backend | Implemented | Default backend. |
+| Pydantic AI backend | Implemented (default) | Typed, model agnostic loop, no LangChain. Included with PyFlue. |
+| DeepAgents backend | Implemented (optional) | `pyflue[deepagents]`. Built on LangChain and LangGraph. |
 | OpenAI Agents backend | Planned | Dependency pinned, runtime not implemented. |
 | Google ADK backend | Planned | Dependency pinned, runtime not implemented. |
-| Pydantic AI backend | Planned | Dependency pinned, runtime not implemented. |
 | Markdown skills | Implemented | `.agents/skills/**/*.md`. |
 | Project instructions | Implemented | `AGENTS.md` and `CLAUDE.md` from project files and active sandbox context. |
 | Sessions | Implemented | SQLite-backed history. |

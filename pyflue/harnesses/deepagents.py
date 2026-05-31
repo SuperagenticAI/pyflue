@@ -311,7 +311,7 @@ def _create_agent_call(
     except Exception as exc:
         raise ImportError(
             "The DeepAgents backend requires the 'deepagents' package. "
-            "Install with: pip install pyflue"
+            "Install with: pip install 'pyflue[deepagents]'"
         ) from exc
 
     backend = _DeepAgentsSandboxBackend(sandbox) if _is_pyflue_sandbox(sandbox) else None

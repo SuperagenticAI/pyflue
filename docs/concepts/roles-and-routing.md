@@ -2,6 +2,15 @@
 
 PyFlue supports scoped roles and file-based agent routes.
 
+!!! note
+    This page covers Markdown roles and the original file based handler model.
+    For the current model, see [Agents](../guides/agents.md) for persistent
+    `create_agent` instances and [Workflows](../guides/workflows.md) for finite
+    `run(ctx)` operations. The file based `default(context)` handler still works
+    and is treated as workflow like, so it keeps its run lifecycle. Markdown
+    roles remain current and bridge to subagent profiles; see
+    [Subagents](../guides/subagents.md).
+
 ## Roles
 
 Roles live in `.agents/roles`.

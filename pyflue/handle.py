@@ -1,8 +1,8 @@
 """Per-call cancellation handle.
 
 Returned from ``session.prompt``, ``session.skill``, ``session.task``, and
-``session.shell``. The handle is awaitable — existing code that writes
-``await session.prompt(...)`` keeps working — and adds a synchronous
+``session.shell``. The handle is awaitable (existing code that writes
+``await session.prompt(...)`` keeps working) and adds a synchronous
 ``.abort(reason)`` plus a ``.signal`` event for cancellation, matching the
 shape Flue's TS runtime exposes via ``CallHandle<T>`` with ``AbortSignal``.
 

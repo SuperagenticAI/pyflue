@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.2.0 - 2026-05-31
+
+This release adopts the TypeScript Flue v0.8 architecture: the **Agents vs
+Workflows** split, plus observability and host-sandbox parity. It also makes
+Pydantic AI the default harness, a typed and LangChain free loop, and moves
+DeepAgents to an optional extra for LangChain users.
+
+### New features
+
+- **Composable agents.** `create_agent(initialize)` defines a deferred,
+  addressable agent; `define_agent_profile()` defines reusable behaviour.
+  `init_agent()` resolves a created agent; `init()` is unchanged and compatible.
+- **Workflows.** Modules in `workflows/` (or `.pyflue/workflows/`) export
+  `run(ctx)`; each invocation is a workflow run with a `workflow:<name>:<ulid>`
+  id. `FlueContext` (formerly `PyFlueContext`, aliased) gains `ctx.id`, `ctx.req`,
+  and `ctx.init(agent)`. `pyflue run <workflow>` runs one locally; `POST
+  /workflows/{name}` supports accepted / `?wait=result` / SSE modes.
+- **Persistent agent instances.** A module that default-exports a created agent
+  is served at `POST /agents/{name}/{id}` with session continuity (no run id);
+  `AgentInstanceManager` caches instances. New pluggable `SessionStore` /
+  `InMemorySessionStore` / `SQLiteSessionStore`.
+- **`dispatch()`.** Accepts JSON-serialisable input for asynchronous agent
+  processing and returns a `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`.
+- **Operation events.** Every session operation emits `operation_start` /
+  `operation` with `operation_id` / `instance_id` correlation.
+- **Observability.** Every model generation emits `turn_request` / `turn`
+  events carrying the model and token usage.
+  `pyflue.observability.create_opentelemetry_observer()` maps the event stream
+  (workflow runs, operations, generations, tools, tasks, and compaction) to
+  OpenTelemetry spans, including `gen_ai.*` usage attributes (`pyflue[otel]`
+  extra).
+- **Host `local()` sandbox.** Real filesystem + subprocess shell with an opt-in
+  env allowlist; `init(sandbox=...)` accepts a factory callable.
+- **Subagent profiles.** `task(agent="name")` selects a declared profile
+  (instructions/model/reasoning/tools); `profile_to_role()` / `role_to_profile()`
+  bridge Markdown roles.
+- **WebSocket surfaces.** Persistent agent (multi-prompt) and workflow (one run)
+  WebSocket endpoints; client `agents.connect()` / `workflows.connect()` /
+  `workflows.invoke()` / `workflows.stream()`.
+- **`ToolDefinition`** is now the canonical name for `ToolDef` (aliased).
+- **Packaged skills.** `load_skill(path)` imports a `SKILL.md` as a reusable
+  `Skill` for `create_agent(skills=[...])` and session calls.
+- **Source layouts.** Agents and workflows are discovered from `src/agents`
+  and `src/workflows`, in addition to the legacy root and `.agents` / `.pyflue`
+  locations. `pyflue init` scaffolds the `src/` layout.
+- **Pydantic AI harness backend, now the default.** PyFlue is driven by the
+  Pydantic AI agent loop by default: typed, model agnostic, and free of LangChain
+  or LangGraph. It is included with PyFlue. It maps PyFlue's merged tools
+  (built-in sandbox tools, custom tools, commands, and MCP) onto Pydantic AI
+  tools and reports token usage. The harness registry remains open for more
+  backends. Verified against real models, including a gated live test over Ollama.
+- Added a chat integration example under `examples/chat/`.
+- Added a [Parity with Flue](docs/reference/flue-parity.md) reference page
+  recording what is implemented and what is intentionally not ported.
+
+### Breaking changes
+
+- **Runs are workflow-only.** Direct/dispatched agent prompts no longer create
+  workflow runs or surface `X-Flue-Run-Id`; they correlate by instance and
+  operation. File-based `default(context)` handlers remain workflow-like and
+  keep their runs.
+- **DeepAgents is now an optional extra and no longer the default harness.** The
+  default is Pydantic AI. Projects that use DeepAgents must install it with
+  `pip install 'pyflue[deepagents]'` and select it with `harness="deepagents"`
+  (or `harness = "deepagents"` in `pyflue.toml`). `deepagents` is no longer a
+  core dependency, so a default install no longer pulls LangChain or LangGraph.
+
 ## 0.1.5
 
 - Added Flue-style HTTP run/admin parity: SSE/webhook agent routes, run event APIs, admin OpenAPI schemas, opaque admin cursors, and `X-Flue-Run-Id` headers.

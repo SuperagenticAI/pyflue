@@ -26,7 +26,6 @@ app = typer.Typer(help="PyFlue agent harness CLI.")
 skill_app = typer.Typer(help="Manage Markdown skills.")
 app.add_typer(skill_app, name="skill")
 console = Console()
-PROMPT_OPTION = typer.Option(..., "--prompt", "-p", help="Prompt to run.")
 SESSION_OPTION = typer.Option("default", "--session", "-s")
 CONFIG_OPTION = typer.Option("pyflue.toml", "--config")
 ALLOW_WRITE_OPTION = typer.Option(False, "--allow-write")
@@ -68,7 +67,7 @@ def init_project(name: str = PROJECT_NAME_ARGUMENT, force: bool = False) -> None
         encoding="utf-8",
     )
     (root / "pyflue.toml").write_text(
-        '[agent]\nmodel = "openai:gpt-5.5"\nharness = "deepagents"\nsandbox = "virtual"\n',
+        '[agent]\nmodel = "openai:gpt-5.5"\nharness = "pydanticai"\nsandbox = "virtual"\n',
         encoding="utf-8",
     )
     _write_skill(root / ".agents" / "skills" / "triage.md", "triage")
@@ -84,6 +83,30 @@ def init_project(name: str = PROJECT_NAME_ARGUMENT, force: bool = False) -> None
         "    session = await agent.session(context.agent_id)\n"
         "    result = await session.prompt(context.payload.get('prompt', 'Hello from PyFlue'))\n"
         "    return {'text': result.text, 'metadata': result.metadata}\n",
+        encoding="utf-8",
+    )
+    # Canonical `src/` layout (reference v0.8.x): persistent agents in
+    # src/agents/ and finite workflows in src/workflows/. Both are discovered.
+    (root / "src" / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "workflows").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "agents" / "assistant.py").write_text(
+        "from pyflue import create_agent\n\n"
+        "default = create_agent(\n"
+        "    lambda ctx: {\n"
+        '        "model": "openai:gpt-5.5",\n'
+        '        "instructions": f"Help with the request represented by {ctx.id}.",\n'
+        "    }\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "workflows" / "summarize.py").write_text(
+        "from pyflue import FlueContext, create_agent\n\n"
+        'agent = create_agent(lambda ctx: {"model": "openai:gpt-5.5"})\n\n\n'
+        "async def run(ctx: FlueContext):\n"
+        "    harness = await ctx.init(agent)\n"
+        "    session = await harness.session()\n"
+        '    response = await session.prompt(f"Summarize:\\n\\n{ctx.payload.get(\'text\', \'\')}")\n'
+        '    return {"summary": response.text}\n',
         encoding="utf-8",
     )
     console.print(f"Created PyFlue project at {root}")
@@ -107,16 +130,42 @@ def add_connector(
 
 @app.command()
 def run(
-    prompt: str = PROMPT_OPTION,
+    workflow: str | None = typer.Argument(
+        None, help="Workflow name to run. Omit to run a one-off --prompt."
+    ),
+    prompt: str | None = typer.Option(
+        None, "--prompt", "-p", help="Prompt to run when no workflow name is given."
+    ),
+    payload: str = PAYLOAD_OPTION,
     session: str = SESSION_OPTION,
     config: Path = CONFIG_OPTION,
     allow_write: bool = ALLOW_WRITE_OPTION,
     allow_shell: bool = ALLOW_SHELL_OPTION,
-    stream: bool = typer.Option(False, "--stream", help="Print normalized stream events."),
+    stream: bool = typer.Option(False, "--stream", help="Print normalized stream events (prompt mode)."),
 ) -> None:
-    """Run one PyFlue prompt."""
+    """Run a workflow, or a one-off prompt with --prompt."""
 
-    async def _run() -> None:
+    async def _run_workflow() -> None:
+        from pyflue.workflows import discover_workflows, invoke_workflow
+
+        loaded = load_config(config)
+        discovered = discover_workflows(loaded.root, getattr(loaded, "workflows_dir", None))
+        if workflow not in discovered:
+            available = ", ".join(sorted(discovered)) or "(none)"
+            raise typer.BadParameter(f"Unknown workflow: {workflow}. Available workflows: {available}")
+        result = await invoke_workflow(
+            discovered[workflow],
+            payload=_parse_payload(payload),
+            config_path=config,
+        )
+        if isinstance(result, dict):
+            console.print_json(data=result)
+        elif hasattr(result, "model_dump"):
+            console.print_json(data=result.model_dump())
+        else:
+            console.print(str(result))
+
+    async def _run_prompt() -> None:
         agent = await init(
             config_path=config,
             allow_write=allow_write,
@@ -130,7 +179,14 @@ def run(
         result = await pyflue_session.prompt(prompt)
         console.print(result.text)
 
-    asyncio.run(_run())
+    if workflow:
+        asyncio.run(_run_workflow())
+    elif prompt is not None:
+        asyncio.run(_run_prompt())
+    else:
+        raise typer.BadParameter(
+            "Provide a workflow name, or --prompt to run a one-off prompt."
+        )
 
 
 @app.command()

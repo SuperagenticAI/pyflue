@@ -32,12 +32,16 @@ agents = await client.agents()
 
 # One prompt
 result = await client.agents.invoke("support_assistant", "ticket-8472", payload={"message": "Status?"})
+print(result["result"]["text"])
 
 # Multiple prompts over one connection
 async with client.agents.connect("support_assistant", "ticket-8472") as conn:
     first = await conn.prompt("Summarize the case.", session="billing")
     second = await conn.prompt("Now draft a reply.", session="billing")
 ```
+
+Persistent direct agent calls return `{"result": ...}` and do not include a run
+id. Runs belong to workflows.
 
 ## Workflows
 

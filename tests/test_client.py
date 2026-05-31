@@ -59,6 +59,22 @@ async def test_create_flue_client_defaults_to_flue_agent_response_shape():
 
 
 @pytest.mark.asyncio
+async def test_create_flue_client_shapes_persistent_agent_response_without_run_id():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"result": {"text": "hello", "usage": {}, "model": {"id": "test"}}},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        client = create_flue_client("http://test", client=http)
+        response = await client.agents.invoke("assistant", "thread-1", {"mode": "sync"})
+
+    assert response == {"result": {"text": "hello", "usage": {}, "model": {"id": "test"}}}
+
+
+@pytest.mark.asyncio
 async def test_agent_response_shape_can_be_overridden_to_raw():
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -105,6 +105,7 @@ async def init(
     sandbox: Any = None,
     python_backend: str | None = None,
     skills_dir: str | Path | None = None,
+    roles_dir: str | Path | None = None,
     config_path: str | Path | None = None,
     env: dict[str, str] | None = None,
     allow_write: bool = False,
@@ -140,6 +141,9 @@ async def init(
     if skills_dir is not None:
         path = Path(skills_dir).expanduser()
         config.skills_dir = path if path.is_absolute() else config.root / path
+    if roles_dir is not None:
+        path = Path(roles_dir).expanduser()
+        config.roles_dir = path if path.is_absolute() else config.root / path
     if env:
         config.env.update({str(key): str(value) for key, value in env.items()})
     if allowed_commands is not None:

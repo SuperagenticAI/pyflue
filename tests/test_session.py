@@ -8,7 +8,7 @@ import aiosqlite
 import pytest
 from pydantic import BaseModel
 
-from pyflue.core import PyFlueAgent
+from pyflue.core import PyFlueAgent, init
 from pyflue.harnesses.base import HarnessBackend
 from pyflue.sandbox import SandboxPolicy
 from pyflue.tools import create_tools, define_tool
@@ -197,6 +197,24 @@ async def test_session_prompt_applies_role_and_model_override(tmp_path):
 
     assert "You review code carefully." in agent.backend.calls[0]["prompt"]
     assert agent.backend.calls[0]["config"].model == "override-model"
+
+
+@pytest.mark.asyncio
+async def test_init_accepts_roles_dir_override(tmp_path):
+    role_dir = tmp_path / "custom_roles"
+    role_dir.mkdir()
+    (role_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\n---\nUse the custom role.",
+        encoding="utf-8",
+    )
+    (tmp_path / "pyflue.toml").write_text("[agent]\nharness = \"deepagents\"\n", encoding="utf-8")
+
+    agent = await init(config_path=tmp_path / "pyflue.toml", roles_dir="custom_roles")
+    agent.backend = _FakeBackend(responses=["ok"])
+
+    await (await agent.session("s1")).prompt("hello", role="reviewer")
+
+    assert "Use the custom role." in agent.backend.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio

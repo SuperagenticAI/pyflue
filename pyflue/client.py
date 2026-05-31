@@ -571,15 +571,15 @@ def _shape_agent_response(body: dict[str, Any], *, mode: str, header_run_id: str
         or body.get("run_id")
         or header_run_id
     )
-    if not run_id:
-        raise ValueError("Flue response did not include a runId.")
-    if mode == "webhook":
-        return {"runId": run_id}
     result = body.get("result") if "result" in body else {
         key: value
         for key, value in body.items()
         if key not in {"_meta", "runId", "run_id"}
     }
+    if mode == "webhook" and run_id:
+        return {"runId": run_id}
+    if not run_id:
+        return {"result": result}
     return {"result": result, "runId": run_id}
 
 

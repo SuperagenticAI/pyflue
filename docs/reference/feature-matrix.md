@@ -12,9 +12,11 @@ This page shows what users can rely on today and what is planned next.
 | Persistent agent instances | Implemented | `create_agent` default-export served at `POST /agents/{name}/{id}` with session continuity; no run id. |
 | Session stores | Implemented | `SessionStore` protocol + `InMemorySessionStore` + `SQLiteSessionStore`. |
 | `dispatch()` | Implemented | Async agent input + `DispatchReceipt`; `POST /agents/{name}/{id}/dispatch`. Process-memory admission. |
+| Chat integration pattern | Implemented | Verified webhooks dispatch to continuing agent sessions; outbound replies are explicit tools. See [Chat](../guides/chat.md). |
 | Operation events | Implemented | `operation_start`/`operation` with `operation_id`/`instance_id`. |
 | Generation telemetry | Implemented | `turn_request`/`turn` events carry model and token usage; mapped to `gen_ai.*` spans. |
 | OpenTelemetry | Implemented | `create_opentelemetry_observer()` (`pyflue[otel]`); workflow, operation, generation, tool, task, and compaction spans. |
+| Model/provider configuration | Implemented | Provider-qualified model strings, thinking levels, and provider endpoint overrides. PyFlue delegates catalog-level routing to harness backends. |
 | Host `local()` sandbox | Implemented | Real fs + subprocess shell, opt-in env allowlist. |
 | Subagent profiles | Implemented | `task(agent="name")` selection; `profile_to_role()`/`role_to_profile()` bridge. |
 | Packaged skills | Implemented | `load_skill(path)` imports a `SKILL.md` as a reusable `Skill`. |
@@ -22,6 +24,7 @@ This page shows what users can rely on today and what is planned next.
 | `ToolDefinition` | Implemented | Canonical name for `ToolDef` (aliased). |
 | Source layouts | Implemented | Discovers `src/agents` and `src/workflows` plus legacy root/`.agents`/`.pyflue`. |
 | Durable execution | Not ported | Cloudflare-specific run recovery. See [Parity with Flue](flue-parity.md). |
+| Durable dispatch admission | Planned | `dispatch()` currently uses process-memory admission; use an application queue for production delivery. |
 
 ## Core
 

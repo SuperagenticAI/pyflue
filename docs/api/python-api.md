@@ -524,10 +524,13 @@ async with create_flue_client(baseUrl="http://127.0.0.1:2024") as client:
 ```
 
 `create_flue_client()` defaults agent invocation results to Flue SDK-style
-shapes: sync calls return `{"result": ..., "runId": ...}` and webhook calls
-return `{"runId": ...}`. `PyFlueClient` keeps raw PyFlue responses by default.
-Pass `agentResponseFormat="raw"` to the factory, or `{"responseFormat": "raw"}`
-to one `agents.invoke()` call, to keep the raw response.
+shapes. Persistent direct agent calls return `{"result": ...}` because they do
+not create workflow runs. Legacy file-based route invocations that include a
+run id return `{"result": ..., "runId": ...}`; webhook receipts return
+`{"runId": ...}` when the server accepts the work as a run. `PyFlueClient`
+keeps raw PyFlue responses by default. Pass `agentResponseFormat="raw"` to the
+factory, or `{"responseFormat": "raw"}` to one `agents.invoke()` call, to keep
+the raw response.
 
 Typed prompt results use the same Pydantic extraction behavior as local
 sessions:
@@ -546,7 +549,7 @@ run namespaces:
 
 ```python
 result = await client.agents.invoke("triage", "issue-123", payload={"prompt": "Review"})
-accepted = await client.agents.invoke("triage", "issue-123", mode="webhook")
+workflow = await client.workflows.invoke("summarize", {"text": "..."})
 
 async for event in client.agents.stream("triage", "issue-123", payload={"prompt": "Review"}):
     print(event.type, event.data)
@@ -565,8 +568,8 @@ async for event in client.agents.invoke(
 ):
     print(event.type, event.data)
 
-run = await client.runs.get(accepted["run_id"])
-events = await client.runs.events(accepted["run_id"], types=["log", "run_end"])
+run = await client.runs.get(workflow["run_id"])
+events = await client.runs.events(workflow["run_id"], types=["log", "run_end"])
 ```
 
 Admin endpoints mounted at `/admin` are available through `client.admin`:

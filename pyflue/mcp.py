@@ -169,6 +169,10 @@ async def connect_mcp_server_stdio(
         raise
 
 
+connectMcpServer = connect_mcp_server
+connectMcpServerStdio = connect_mcp_server_stdio
+
+
 def _create_mcp_tools(server_name: str, session: ClientSession, tools: list[McpTool]) -> list[McpToolDef]:
     """Convert MCP tools to PyFlue tool definitions."""
     names: set[str] = set()

@@ -155,9 +155,10 @@ The agent acts on the input through its own tools. See the
 [chat example](https://github.com/SuperagenticAI/pyflue/tree/main/examples/chat)
 for a webhook to dispatch to reply pattern.
 
-On the current Python path, dispatch uses process memory admission, so accepted
-work can be lost on restart. Choose a durable delivery path when restart safe
-processing is required.
+On the current Python path, dispatch uses process-memory admission, so accepted
+work can be lost on restart. Choose a durable delivery path when restart-safe
+processing is required. See [Production](production.md) for the recommended
+queue-backed pattern.
 
 ## Drive an agent from code
 

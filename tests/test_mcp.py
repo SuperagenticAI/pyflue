@@ -10,8 +10,11 @@ from pyflue.mcp import McpStdioServerOptions, connect_mcp_server_stdio
 def test_public_api_exports_mcp_connectors():
     import pyflue
 
+    assert pyflue.McpServerOptions
     assert pyflue.connect_mcp_server_stdio is connect_mcp_server_stdio
     assert callable(pyflue.connect_mcp_server)
+    assert pyflue.connectMcpServer is pyflue.connect_mcp_server
+    assert pyflue.connectMcpServerStdio is pyflue.connect_mcp_server_stdio
 
 
 @pytest.mark.asyncio

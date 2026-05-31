@@ -106,6 +106,8 @@ PyFlue gives you the core pieces needed for agentic workflows:
 - a backend registry for OpenAI Agents, Google ADK, and custom harness backends
 - streaming events through Python, CLI, and SSE
 - route triggers for file-based webhook agents
+- chat integration through verified webhooks, `dispatch()`, and explicit reply tools
+- provider-qualified model selection and provider endpoint overrides
 - secret grants for shell and prompt calls
 - command allowlists and compound-command protection
 - deployment files for Docker/FastAPI, GitHub Actions, GitLab CI, Railway,
@@ -148,6 +150,7 @@ async def main():
 - Start with [Getting Started](getting-started.md).
 - Understand [Agents vs Workflows](concepts/agents-vs-workflows.md).
 - Build an [agent](guides/agents.md) or a [workflow](guides/workflows.md).
-- Add [tools](guides/tools.md), [subagents](guides/subagents.md), and [observability](guides/observability.md).
+- Add [models](guides/models.md), [tools](guides/tools.md), [subagents](guides/subagents.md), [chat](guides/chat.md), and [observability](guides/observability.md).
 - Connect with the [client](guides/client.md) and choose a [deployment target](deployment.md).
+- Review the [production checklist](guides/production.md) before accepting external traffic.
 - Check [parity with Flue](reference/flue-parity.md) and the [feature matrix](reference/feature-matrix.md).

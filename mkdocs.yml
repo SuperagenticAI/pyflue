@@ -67,10 +67,13 @@ nav:
   - Guides:
       - Agents: guides/agents.md
       - Workflows: guides/workflows.md
+      - Models: guides/models.md
       - Subagents: guides/subagents.md
       - Tools: guides/tools.md
+      - Chat: guides/chat.md
       - Client: guides/client.md
       - Observability: guides/observability.md
+      - Production: guides/production.md
       - Build a Coding Agent: guides/coding-agent.md
       - Example Agents: guides/example-agents.md
       - Create a Skill: guides/create-a-skill.md

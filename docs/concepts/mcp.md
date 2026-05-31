@@ -158,6 +158,29 @@ mcp_servers={
 }
 ```
 
+## Connecting One Server
+
+For Flue-style code that connects one remote MCP server and attaches its tools
+to an agent, use `connect_mcp_server(...)`. The camelCase alias
+`connectMcpServer(...)` is also exported.
+
+```python
+from pyflue import McpServerOptions, connect_mcp_server, init
+
+inventory = await connect_mcp_server(
+    "inventory",
+    McpServerOptions(
+        url="https://example.com/mcp",
+        headers={"Authorization": "Bearer token"},
+    ),
+)
+
+try:
+    agent = await init(tools=inventory.tools)
+finally:
+    await inventory.close()
+```
+
 ## Using MCPClient Directly
 
 For programmatic access to MCP servers, use the `MCPClient` class directly:

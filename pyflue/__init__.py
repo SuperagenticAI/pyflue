@@ -31,9 +31,12 @@ from pyflue.harnesses.registry import register_harness
 from pyflue.mcp import (
     MCPClient,
     McpServerConnection,
+    McpServerOptions,
     McpStdioServerOptions,
     connect_mcp_server,
     connect_mcp_server_stdio,
+    connectMcpServer,
+    connectMcpServerStdio,
 )
 from pyflue.observability import create_opentelemetry_observer
 from pyflue.routing import (
@@ -123,6 +126,7 @@ __all__ = [
     "McpMode",
     "McpServerConfig",
     "McpServerConnection",
+    "McpServerOptions",
     "McpStdioServerOptions",
     "PyFlueAgent",
     "PyFlueClient",
@@ -186,6 +190,8 @@ __all__ = [
     "ToolDefinition",
     "connect_mcp_server",
     "connect_mcp_server_stdio",
+    "connectMcpServer",
+    "connectMcpServerStdio",
     "createTools",
     "create_tools",
     "define_config",

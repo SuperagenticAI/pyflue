@@ -51,7 +51,7 @@ dependencies = [
   "httpx>=0.28.1,<1",
   "mcp>=1.27.0",
   "pydantic>=2.12.2,<3",
-  "pydantic-ai>=1.89.1,<1.90.0",
+  "pydantic-ai>=1.89.1,<1.105.0",
   "python-frontmatter>=1.1.0",
   "pyyaml>=6.0.2,<7",
   "rich>=13.7.0",
@@ -75,7 +75,7 @@ sandboxes = [
 ]
 deepagents = ["deepagents>=0.5.6,<0.6.0"]
 pydanticai = [
-  "pydantic-ai>=1.89.1,<1.90.0",
+  "pydantic-ai>=1.89.1,<1.105.0",
   "pydantic-ai-harness[code-mode]",
   "pydantic-ai-slim>=1.89.1,<1.90.0",
 ]

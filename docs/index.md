@@ -30,8 +30,10 @@ pyflue run --prompt "Review this project"
 </div>
 
 PyFlue gives Python developers a framework-shaped agent runtime instead of a
-collection of low-level primitives. The default backend is DeepAgents, with a
-stable PyFlue API layered above it.
+collection of low-level primitives. The default backend is Pydantic AI, a typed
+and model agnostic loop with no LangChain dependency. DeepAgents is available as
+an optional extra for LangChain users. A stable PyFlue API is layered above the
+harness.
 
 PyFlue provides Markdown skills, stateful sessions, sandboxed tools, typed
 outputs, and deployable agent entrypoints for Python teams with Pydantic,
@@ -100,9 +102,8 @@ PyFlue gives you the core pieces needed for agentic workflows:
 - cancellation for active prompt, stream, task, and shell operations
 - structured command tools with `PyFlueCommand`
 - a Python client for deployed PyFlue servers
-- a DeepAgents runtime backend
-- a backend registry for future OpenAI Agents, Google ADK, Pydantic AI, and
-  custom harness backends
+- a default Pydantic AI runtime backend, with DeepAgents available as an optional extra
+- a backend registry for OpenAI Agents, Google ADK, and custom harness backends
 - streaming events through Python, CLI, and SSE
 - route triggers for file-based webhook agents
 - secret grants for shell and prompt calls

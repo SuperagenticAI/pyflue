@@ -1,9 +1,11 @@
 # Changelog
 
-## 0.2.0
+## 0.2.0 - 2026-05-31
 
 This release adopts the TypeScript Flue v0.8 architecture: the **Agents vs
-Workflows** split, plus observability and host-sandbox parity.
+Workflows** split, plus observability and host-sandbox parity. It also makes
+Pydantic AI the default harness, a typed and LangChain free loop, and moves
+DeepAgents to an optional extra for LangChain users.
 
 ### New features
 
@@ -43,6 +45,12 @@ Workflows** split, plus observability and host-sandbox parity.
 - **Source layouts.** Agents and workflows are discovered from `src/agents`
   and `src/workflows`, in addition to the legacy root and `.agents` / `.pyflue`
   locations. `pyflue init` scaffolds the `src/` layout.
+- **Pydantic AI harness backend, now the default.** PyFlue is driven by the
+  Pydantic AI agent loop by default: typed, model agnostic, and free of LangChain
+  or LangGraph. It is included with PyFlue. It maps PyFlue's merged tools
+  (built-in sandbox tools, custom tools, commands, and MCP) onto Pydantic AI
+  tools and reports token usage. The harness registry remains open for more
+  backends. Verified against real models, including a gated live test over Ollama.
 - Added a chat integration example under `examples/chat/`.
 - Added a [Parity with Flue](docs/reference/flue-parity.md) reference page
   recording what is implemented and what is intentionally not ported.
@@ -53,6 +61,11 @@ Workflows** split, plus observability and host-sandbox parity.
   workflow runs or surface `X-Flue-Run-Id`; they correlate by instance and
   operation. File-based `default(context)` handlers remain workflow-like and
   keep their runs.
+- **DeepAgents is now an optional extra and no longer the default harness.** The
+  default is Pydantic AI. Projects that use DeepAgents must install it with
+  `pip install 'pyflue[deepagents]'` and select it with `harness="deepagents"`
+  (or `harness = "deepagents"` in `pyflue.toml`). `deepagents` is no longer a
+  core dependency, so a default install no longer pulls LangChain or LangGraph.
 
 ## 0.1.5
 

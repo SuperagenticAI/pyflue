@@ -4165,11 +4165,11 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
-    { name = "deepagents" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "pydantic" },
+    { name = "pydantic-ai" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -4182,7 +4182,11 @@ dependencies = [
 daytona = [
     { name = "daytona-sdk" },
 ]
+deepagents = [
+    { name = "deepagents" },
+]
 dev = [
+    { name = "deepagents" },
     { name = "opentelemetry-sdk" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -4238,7 +4242,8 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "daytona-sdk", marker = "extra == 'daytona'", specifier = ">=0.22.0" },
     { name = "daytona-sdk", marker = "extra == 'sandboxes'", specifier = ">=0.22.0" },
-    { name = "deepagents", specifier = ">=0.5.6,<0.6.0" },
+    { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.5.6,<0.6.0" },
+    { name = "deepagents", marker = "extra == 'dev'", specifier = ">=0.5.6,<0.6.0" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.7.0" },
     { name = "e2b", marker = "extra == 'sandboxes'", specifier = ">=2.7.0" },
     { name = "fastapi", specifier = ">=0.124.0,<1" },
@@ -4256,6 +4261,7 @@ requires-dist = [
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20" },
     { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.20" },
     { name = "pydantic", specifier = ">=2.12.2,<3" },
+    { name = "pydantic-ai", specifier = ">=1.89.1,<1.90.0" },
     { name = "pydantic-ai", marker = "extra == 'pydanticai'", specifier = ">=1.89.1,<1.90.0" },
     { name = "pydantic-ai-harness", extras = ["code-mode"], marker = "extra == 'pydanticai'" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydanticai'", specifier = ">=1.89.1,<1.90.0" },
@@ -4275,7 +4281,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6,<7" },
     { name = "websockets", marker = "extra == 'server'", specifier = ">=12" },
 ]
-provides-extras = ["openai", "google", "daytona", "e2b", "modal", "runloop", "sandboxes", "pydanticai", "dev", "docs", "monty", "otel", "server"]
+provides-extras = ["openai", "google", "daytona", "e2b", "modal", "runloop", "sandboxes", "deepagents", "pydanticai", "dev", "docs", "monty", "otel", "server"]
 
 [[package]]
 name = "pygments"

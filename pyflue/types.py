@@ -146,7 +146,7 @@ class PyFlueConfig:
 
     model: str | None = None
     thinking_level: ThinkingLevel | None = None
-    harness: str = "deepagents"
+    harness: str = "pydanticai"
     sandbox: str = "virtual"
     python_backend: str | None = None
     root: Path = field(default_factory=Path.cwd)

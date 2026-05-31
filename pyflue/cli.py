@@ -67,7 +67,7 @@ def init_project(name: str = PROJECT_NAME_ARGUMENT, force: bool = False) -> None
         encoding="utf-8",
     )
     (root / "pyflue.toml").write_text(
-        '[agent]\nmodel = "openai:gpt-5.5"\nharness = "deepagents"\nsandbox = "virtual"\n',
+        '[agent]\nmodel = "openai:gpt-5.5"\nharness = "pydanticai"\nsandbox = "virtual"\n',
         encoding="utf-8",
     )
     _write_skill(root / ".agents" / "skills" / "triage.md", "triage")

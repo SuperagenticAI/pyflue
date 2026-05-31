@@ -454,5 +454,5 @@ agent defines a `reply_to_thread` tool closing over the thread id; README.
 - **0.2.0** — Phase 1 (items 1–5): the Agents/Workflows architecture. Breaking
   (runs re-scoped); ship migration notes.
 - **0.2.x** — Phase 2 (items 6–8): OTel, `local()`, profiles.
-- **0.3.0** — Phase 3 (items 9–11): WebSocket, chat, docs/rename.
+- **0.2.0** — Phase 3 (items 9–11): WebSocket, chat, docs/rename.
 ```

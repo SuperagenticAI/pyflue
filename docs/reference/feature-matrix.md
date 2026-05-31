@@ -2,7 +2,7 @@
 
 This page shows what users can rely on today and what is planned next.
 
-## Agents & Workflows (v0.2.0)
+## Agents & Workflows (v0.3.0)
 
 | Feature | Status | Notes |
 | --- | --- | --- |
@@ -28,10 +28,10 @@ This page shows what users can rely on today and what is planned next.
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Python package | Implemented | `pyflue` package with console script. |
-| DeepAgents backend | Implemented | Default backend. |
+| Pydantic AI backend | Implemented (default) | Typed, model agnostic loop, no LangChain. Included with PyFlue. |
+| DeepAgents backend | Implemented (optional) | `pyflue[deepagents]`. Built on LangChain and LangGraph. |
 | OpenAI Agents backend | Planned | Dependency pinned, runtime not implemented. |
 | Google ADK backend | Planned | Dependency pinned, runtime not implemented. |
-| Pydantic AI backend | Planned | Dependency pinned, runtime not implemented. |
 | Markdown skills | Implemented | `.agents/skills/**/*.md`. |
 | Project instructions | Implemented | `AGENTS.md` and `CLAUDE.md` from project files and active sandbox context. |
 | Sessions | Implemented | SQLite-backed history. |

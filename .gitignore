@@ -48,6 +48,7 @@ site/
 # Generated deployment artifacts
 Dockerfile
 app.py
+!examples/chat/app.py
 railway.json
 render.yaml
 fly.toml

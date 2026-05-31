@@ -62,7 +62,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai-agents>=0.15.1,<0.16.0", "openai>=2.26.0,<3"]
-google = ["google-adk>=1.32.0,<1.33.0", "google-genai>=1.72,<2"]
+google = ["google-adk>=1.32.0,<1.33.0", "google-genai>=1.72,<3"]
 daytona = ["daytona-sdk>=0.22.0"]
 e2b = ["e2b>=2.7.0"]
 modal = ["modal>=1.3.0"]

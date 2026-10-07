@@ -213,6 +213,15 @@ result = client.call_tool(
 )
 ```
 
+## Runnable Parallel Search example
+
+For anonymous web search and page extraction over Streamable HTTP, see the
+[Parallel Search MCP example](https://github.com/SuperagenticAI/pyflue/tree/main/examples/parallel_search).
+It uses the public `MCPClient` to discover and call `web_search` and `web_fetch`,
+prints their responses, and needs no Parallel API key or model key. Anonymous
+access has lower rate limits. The example is opt-in and leaves existing MCP
+configuration and defaults unchanged.
+
 ## API Reference
 
 ### `init()` Parameters
